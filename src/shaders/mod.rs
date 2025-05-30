@@ -36,7 +36,9 @@ pub struct UniformData {
     pub particle_size: f32,
     pub cam_top_left: [f32; 2],
     pub wrap: u32,
-    pub _padding: [f32; 3],
+    pub show_tiling: u32,
+    pub world_size: f32,
+    pub tile_fade_strength: f32,
 }
 
 pub struct ParticleShader {

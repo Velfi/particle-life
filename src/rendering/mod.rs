@@ -89,13 +89,18 @@ impl ParticleRenderer {
         render_pass: &mut wgpu::RenderPass<'a>,
         shader: &'a ParticleShader,
         particle_count: usize,
+        show_tiling: bool,
     ) {
         if let Some(ref vertex_buffer) = self.vertex_buffer {
             render_pass.set_pipeline(&shader.render_pipeline);
             render_pass.set_bind_group(0, &shader.bind_group, &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            
+            // If tiling is enabled, draw 9 instances (3x3 grid), otherwise draw 1 instance
+            let instance_count = if show_tiling { 9 } else { 1 };
+            
             // Draw 6 vertices per particle (2 triangles making a quad)
-            render_pass.draw(0..(particle_count * 6) as u32, 0..1);
+            render_pass.draw(0..(particle_count * 6) as u32, 0..instance_count);
         }
     }
 }
@@ -278,7 +283,7 @@ impl Camera {
 
             // Calculate new position to zoom towards mouse
             let new_x = self.target_position.x - mouse_x_norm * size_diff;
-            let new_y = self.target_position.y - mouse_y_norm * size_diff / aspect_ratio as f64;
+            let new_y = self.target_position.y - mouse_y_norm * size_diff / aspect_ratio;
 
             // Apply strict bounds checking
             self.target_size = clamped_size;

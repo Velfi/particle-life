@@ -3,8 +3,6 @@ mod rendering;
 mod shaders;
 mod ui;
 mod app_settings;
-mod gpu_physics;
-mod instanced_renderer;
 
 use winit::{
     event::{Event, WindowEvent, KeyEvent, MouseButton, ElementState},
@@ -34,8 +32,6 @@ use physics::{
 use rendering::{
     ParticleRenderer, Camera, NaturalRainbowPalette, SimpleRainbowPalette, SunsetPalette, HexPalette, Palette
 };
-use gpu_physics::GpuPhysicsSystem;
-use instanced_renderer::InstancedParticleRenderer;
 use shaders::{ParticleShader, UniformData, FadeShader};
 use ui::{SelectionManager, Clock, Loop};
 use app_settings::AppSettings;
@@ -59,9 +55,6 @@ struct Application {
     
     // Physics
     physics: ExtendedPhysics,
-    gpu_physics: GpuPhysicsSystem,
-    instanced_renderer: InstancedParticleRenderer,
-    use_gpu_physics: bool,
     physics_snapshot: PhysicsSnapshot,
     physics_loop: Loop,
     new_snapshot_available: Arc<Mutex<bool>>,
@@ -76,6 +69,7 @@ struct Application {
     show_graphics_window: bool,
     show_controls_window: bool,
     show_about_window: bool,
+    tile_fade_strength: f32,
     traces: bool,
     trace_fade: f32,
     traces_user_enabled: bool,  // User's actual traces setting
@@ -229,11 +223,6 @@ impl Application {
             Box::new(DefaultMatrixGenerator),
         );
         
-        // Initialize GPU physics system
-        let max_particles = 200000;
-        let gpu_physics = GpuPhysicsSystem::new(&device, max_particles);
-        let instanced_renderer = InstancedParticleRenderer::new(&device, surface_format, max_particles);
-        
         let physics_snapshot = PhysicsSnapshot::new();
         let physics_loop = Loop::new();
         let new_snapshot_available = Arc::new(Mutex::new(false));
@@ -315,9 +304,6 @@ impl Application {
             world_texture_view,
             world_texture_id,
             physics,
-            gpu_physics,
-            instanced_renderer,
-            use_gpu_physics: true, // Start with GPU physics enabled
             physics_snapshot,
             physics_loop,
             new_snapshot_available,
@@ -328,6 +314,7 @@ impl Application {
             show_graphics_window: false,
             show_controls_window: false,
             show_about_window: false,
+            tile_fade_strength: 0.7,
             traces: false,
             trace_fade: 0.95,
             traces_user_enabled: false,
@@ -362,7 +349,7 @@ impl Application {
 
     fn setup(&mut self) {
         // Initialize physics with some default particles
-        self.physics.set_particle_count(5000);
+        self.physics.set_particle_count(20_000);
         self.physics.set_matrix_size(4);
         self.physics.set_positions();
         
@@ -375,9 +362,6 @@ impl Application {
         // Take initial snapshot
         self.physics_snapshot = self.physics.take_snapshot();
         
-        // Initialize GPU physics with CPU particle data
-        self.gpu_physics.initialize_particles(&self.queue, &self.physics.particles);
-        self.gpu_physics.update_matrix(&self.queue, &self.physics.matrix);
         
         // Initialize local matrix copy
         let matrix_size = self.physics.matrix.size();
@@ -756,11 +740,13 @@ impl Application {
                     (self.camera.position.y - self.camera.size * 0.5) as f32,
                 ],
                 wrap: if self.physics.settings.wrap { 1 } else { 0 },
-                _padding: [0.0; 3],
+                show_tiling: 1, // Always enable tiling
+                world_size: 4.0,
+                tile_fade_strength: self.tile_fade_strength,
             };
 
             self.particle_shader.update_uniforms(&self.queue, &uniform_data);
-            self.particle_renderer.render(&mut render_pass, &self.particle_shader, self.physics_snapshot.particle_count);
+            self.particle_renderer.render(&mut render_pass, &self.particle_shader, self.physics_snapshot.particle_count, true);
         }
 
 
@@ -772,6 +758,7 @@ impl Application {
         let show_graphics_window = &mut self.show_graphics_window;
         let show_controls_window = &mut self.show_controls_window;
         let show_about_window = &mut self.show_about_window;
+        let tile_fade_strength = &mut self.tile_fade_strength;
         let traces_user_enabled = &mut self.traces_user_enabled;
         let camera_is_moving = self.camera_is_moving;
         let physics_loop_pause = &mut self.physics_loop.pause;
@@ -1261,6 +1248,15 @@ impl Application {
                         ui.checkbox(traces_user_enabled, "Traces [T]");
                         if camera_is_moving && *traces_user_enabled {
                             ui.label("(disabled during panning)");
+                        }
+                        
+                        ui.label("3x3 Tiling: Always enabled");
+                        ui.horizontal(|ui| {
+                            ui.label("Edge Fade:");
+                            ui.add(egui::Slider::new(tile_fade_strength, 0.0..=1.0).step_by(0.05).text("strength"));
+                        });
+                        if *tile_fade_strength > 0.0 {
+                            ui.label("Edge tiles fade to emphasize center tile");
                         }
                         
                         if *traces_user_enabled {
