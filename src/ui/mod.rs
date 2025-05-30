@@ -1,19 +1,17 @@
-
-
 pub struct SelectionManager<T> {
     items: Vec<NamedItem<T>>,
     active_index: usize,
 }
 
 pub struct NamedItem<T> {
-    pub name: String,
     pub object: T,
 }
 
 impl<T> SelectionManager<T> {
     pub fn new(items: Vec<(String, T)>) -> Self {
-        let items = items.into_iter()
-            .map(|(name, object)| NamedItem { name, object })
+        let items = items
+            .into_iter()
+            .map(|(_, object)| NamedItem { object })
             .collect();
         Self {
             items,
@@ -24,27 +22,7 @@ impl<T> SelectionManager<T> {
     pub fn get_active(&self) -> &T {
         &self.items[self.active_index].object
     }
-
-    pub fn get_active_name(&self) -> &str {
-        &self.items[self.active_index].name
-    }
-    
-    pub fn get_active_index(&self) -> usize {
-        self.active_index
-    }
-    
-    pub fn get_item_names(&self) -> Vec<&str> {
-        self.items.iter().map(|item| item.name.as_str()).collect()
-    }
-
-    pub fn set_active(&mut self, index: usize) {
-        if index < self.items.len() {
-            self.active_index = index;
-        }
-    }
-
 }
-
 
 pub struct Clock {
     last_time: std::time::Instant,
@@ -73,7 +51,11 @@ impl Clock {
     }
 
     pub fn get_dt_millis(&self) -> f64 {
-        self.dt_history.last().copied().unwrap_or(1.0 / self.target_fps) * 1000.0
+        self.dt_history
+            .last()
+            .copied()
+            .unwrap_or(1.0 / self.target_fps)
+            * 1000.0
     }
 
     pub fn get_avg_framerate(&self) -> f64 {
@@ -95,9 +77,6 @@ pub struct Loop {
 
 impl Loop {
     pub fn new() -> Self {
-        Self {
-            pause: false,
-        }
+        Self { pause: false }
     }
-
 }

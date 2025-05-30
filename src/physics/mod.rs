@@ -1,7 +1,7 @@
 use nalgebra::Vector3;
 use rand::Rng;
-use serde::{Deserialize, Serialize};
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 pub type Position = Vector3<f64>;
 pub type Velocity = Vector3<f64>;
@@ -49,7 +49,13 @@ pub trait PositionSetter: Send + Sync {
 }
 
 pub trait TypeSetter: Send + Sync {
-    fn set_type(&self, position: &Position, velocity: &Velocity, current_type: usize, n_types: usize) -> usize;
+    fn set_type(
+        &self,
+        position: &Position,
+        velocity: &Velocity,
+        current_type: usize,
+        n_types: usize,
+    ) -> usize;
 }
 
 pub trait MatrixGenerator: Send + Sync {
@@ -145,11 +151,12 @@ impl ExtendedPhysics {
         self.particles.clear();
         self.force_buffer.clear();
         self.force_buffer.resize(count, Vector3::new(0.0, 0.0, 0.0));
-        
+
         for i in 0..count {
             let mut particle = Particle::new();
             let type_id = i % self.matrix.size();
-            self.position_setter.set_position(&mut particle.position, type_id, self.matrix.size());
+            self.position_setter
+                .set_position(&mut particle.position, type_id, self.matrix.size());
             particle.type_id = type_id;
             self.particles.push(particle);
         }
@@ -170,13 +177,21 @@ impl ExtendedPhysics {
 
     pub fn set_positions(&mut self) {
         for particle in &mut self.particles {
-            self.position_setter.set_position(&mut particle.position, particle.type_id, self.matrix.size());
+            self.position_setter.set_position(
+                &mut particle.position,
+                particle.type_id,
+                self.matrix.size(),
+            );
         }
     }
 
     pub fn set_positions_with_setter(&mut self, position_setter: &dyn PositionSetter) {
         for particle in &mut self.particles {
-            position_setter.set_position(&mut particle.position, particle.type_id, self.matrix.size());
+            position_setter.set_position(
+                &mut particle.position,
+                particle.type_id,
+                self.matrix.size(),
+            );
         }
     }
 
@@ -211,11 +226,15 @@ impl ExtendedPhysics {
 
     pub fn set_type_count(&mut self, new_type_count: &[usize]) {
         self.particles.clear();
-        
+
         for (type_id, &count) in new_type_count.iter().enumerate() {
             for _ in 0..count {
                 let mut particle = Particle::new();
-                self.position_setter.set_position(&mut particle.position, type_id, self.matrix.size());
+                self.position_setter.set_position(
+                    &mut particle.position,
+                    type_id,
+                    self.matrix.size(),
+                );
                 particle.type_id = type_id;
                 self.particles.push(particle);
             }
@@ -227,19 +246,24 @@ impl ExtendedPhysics {
         let types_count = self.matrix.size();
         let particles_per_type = total_particles / types_count;
         let remainder = total_particles % types_count;
-        
+
         let new_type_count: Vec<usize> = (0..types_count)
             .map(|i| particles_per_type + if i < remainder { 1 } else { 0 })
             .collect();
-        
+
         self.set_type_count(&new_type_count);
     }
 
     pub fn update(&mut self) {
         self.update_with_cursor(None, 0.0, 0.0);
     }
-    
-    pub fn update_with_cursor(&mut self, cursor_pos: Option<Vector3<f64>>, cursor_size: f64, cursor_strength: f64) {
+
+    pub fn update_with_cursor(
+        &mut self,
+        cursor_pos: Option<Vector3<f64>>,
+        cursor_size: f64,
+        cursor_strength: f64,
+    ) {
         let dt = self.settings.dt;
         let rmax = self.settings.rmax;
         let friction = self.settings.friction;
@@ -253,7 +277,8 @@ impl ExtendedPhysics {
 
         // Ensure force buffer is the right size
         if self.force_buffer.len() != self.particles.len() {
-            self.force_buffer.resize(self.particles.len(), Vector3::new(0.0, 0.0, 0.0));
+            self.force_buffer
+                .resize(self.particles.len(), Vector3::new(0.0, 0.0, 0.0));
         }
 
         // Clear spatial grid and rebuild it
@@ -271,123 +296,145 @@ impl ExtendedPhysics {
         let chunk_size = (self.particles.len() / num_cpus::get()).max(1);
         let rmax_sq = rmax * rmax;
         let beta = 0.3;
-        
-        self.force_buffer.par_chunks_mut(chunk_size).enumerate().for_each(|(chunk_idx, force_chunk)| {
-            let start_idx = chunk_idx * chunk_size;
-            let mut neighbor_buffer = Vec::new();
-            
-            for (local_i, force) in force_chunk.iter_mut().enumerate() {
-                let i = start_idx + local_i;
-                if i >= self.particles.len() { break; }
-                
-                let particle_i = &self.particles[i];
-                
-                // Get nearby particles from spatial grid
-                self.spatial_grid.get_neighbors(&particle_i.position, rmax, &mut neighbor_buffer);
-                
-                for &j in &neighbor_buffer {
-                    if i != j {
-                        let particle_j = &self.particles[j];
-                        let mut delta = particle_j.position - particle_i.position;
-                        
-                        // Handle wrapping boundaries with proper distance calculation
-                        if wrap {
-                            // Find the shortest distance across boundaries
-                            let world_size = 4.0; // -2.0 to 2.0 = 4.0 width
-                            
-                            if delta.x > world_size / 2.0 {
-                                delta.x -= world_size;
-                            } else if delta.x < -world_size / 2.0 {
-                                delta.x += world_size;
+
+        self.force_buffer
+            .par_chunks_mut(chunk_size)
+            .enumerate()
+            .for_each(|(chunk_idx, force_chunk)| {
+                let start_idx = chunk_idx * chunk_size;
+                let mut neighbor_buffer = Vec::new();
+
+                for (local_i, force) in force_chunk.iter_mut().enumerate() {
+                    let i = start_idx + local_i;
+                    if i >= self.particles.len() {
+                        break;
+                    }
+
+                    let particle_i = &self.particles[i];
+
+                    // Get nearby particles from spatial grid
+                    self.spatial_grid.get_neighbors(
+                        &particle_i.position,
+                        rmax,
+                        &mut neighbor_buffer,
+                    );
+
+                    for &j in &neighbor_buffer {
+                        if i != j {
+                            let particle_j = &self.particles[j];
+                            let mut delta = particle_j.position - particle_i.position;
+
+                            // Handle wrapping boundaries with proper distance calculation
+                            if wrap {
+                                // Find the shortest distance across boundaries
+                                let world_size = 4.0; // -2.0 to 2.0 = 4.0 width
+
+                                if delta.x > world_size / 2.0 {
+                                    delta.x -= world_size;
+                                } else if delta.x < -world_size / 2.0 {
+                                    delta.x += world_size;
+                                }
+
+                                if delta.y > world_size / 2.0 {
+                                    delta.y -= world_size;
+                                } else if delta.y < -world_size / 2.0 {
+                                    delta.y += world_size;
+                                }
                             }
-                            
-                            if delta.y > world_size / 2.0 {
-                                delta.y -= world_size;
-                            } else if delta.y < -world_size / 2.0 {
-                                delta.y += world_size;
+
+                            let distance_sq = delta.norm_squared();
+
+                            if distance_sq > 0.0 && distance_sq < rmax_sq {
+                                let distance = distance_sq.sqrt();
+                                let attraction =
+                                    self.matrix.get(particle_i.type_id, particle_j.type_id);
+
+                                let force_magnitude = if distance < beta * rmax {
+                                    (distance / (beta * rmax) - 1.0) * force_multiplier
+                                } else {
+                                    attraction
+                                        * (1.0
+                                            - (1.0 + beta - 2.0 * distance / rmax).abs()
+                                                / (1.0 - beta))
+                                        * force_multiplier
+                                };
+
+                                *force += delta * (force_magnitude / distance);
                             }
-                        }
-                        
-                        let distance_sq = delta.norm_squared();
-                        
-                        if distance_sq > 0.0 && distance_sq < rmax_sq {
-                            let distance = distance_sq.sqrt();
-                            let attraction = self.matrix.get(particle_i.type_id, particle_j.type_id);
-                            
-                            let force_magnitude = if distance < beta * rmax {
-                                (distance / (beta * rmax) - 1.0) * force_multiplier
-                            } else {
-                                attraction * (1.0 - (1.0 + beta - 2.0 * distance / rmax).abs() / (1.0 - beta)) * force_multiplier
-                            };
-                            
-                            *force += delta * (force_magnitude / distance);
                         }
                     }
                 }
-            }
-        });
+            });
 
         // Apply cursor forces if cursor is active
         if let Some(cursor_position) = cursor_pos {
             let cursor_radius_sq = cursor_size * cursor_size;
-            
-            self.force_buffer.par_iter_mut().enumerate().for_each(|(i, force)| {
-                let particle = &self.particles[i];
-                let mut delta = cursor_position - particle.position;
-                
-                // Handle wrapping for cursor forces too
-                if wrap {
-                    let world_size = 4.0;
-                    if delta.x > world_size / 2.0 {
-                        delta.x -= world_size;
-                    } else if delta.x < -world_size / 2.0 {
-                        delta.x += world_size;
+
+            self.force_buffer
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(i, force)| {
+                    let particle = &self.particles[i];
+                    let mut delta = cursor_position - particle.position;
+
+                    // Handle wrapping for cursor forces too
+                    if wrap {
+                        let world_size = 4.0;
+                        if delta.x > world_size / 2.0 {
+                            delta.x -= world_size;
+                        } else if delta.x < -world_size / 2.0 {
+                            delta.x += world_size;
+                        }
+                        if delta.y > world_size / 2.0 {
+                            delta.y -= world_size;
+                        } else if delta.y < -world_size / 2.0 {
+                            delta.y += world_size;
+                        }
                     }
-                    if delta.y > world_size / 2.0 {
-                        delta.y -= world_size;
-                    } else if delta.y < -world_size / 2.0 {
-                        delta.y += world_size;
+
+                    let distance_sq = delta.norm_squared();
+
+                    if distance_sq > 0.0 && distance_sq < cursor_radius_sq {
+                        let distance = distance_sq.sqrt();
+                        let falloff = 1.0 - (distance / cursor_size); // Linear falloff
+                        let cursor_force_magnitude = cursor_strength * falloff;
+
+                        // Normalize delta to get direction
+                        if distance > 0.0 {
+                            *force += delta * (cursor_force_magnitude / distance);
+                        }
                     }
-                }
-                
-                let distance_sq = delta.norm_squared();
-                
-                if distance_sq > 0.0 && distance_sq < cursor_radius_sq {
-                    let distance = distance_sq.sqrt();
-                    let falloff = 1.0 - (distance / cursor_size); // Linear falloff
-                    let cursor_force_magnitude = cursor_strength * falloff;
-                    
-                    // Normalize delta to get direction
-                    if distance > 0.0 {
-                        *force += delta * (cursor_force_magnitude / distance);
-                    }
-                }
-            });
+                });
         }
 
         // Apply forces and update velocities and positions in parallel
-        self.particles.par_iter_mut().enumerate().for_each(|(i, particle)| {
-            // Update velocity with force and friction
-            particle.velocity += self.force_buffer[i] * dt;
-            particle.velocity *= friction.powf(dt * 60.0); // Friction adjusted for frame rate
-            
-            // Update position
-            particle.position += particle.velocity * dt;
-            
-            // Handle boundaries with improved wrapping
-            if wrap {
-                let world_size = 4.0;
-                let world_min = -2.0;
-                
-                // Proper modulo wrapping that handles negative numbers correctly
-                particle.position.x = world_min + ((particle.position.x - world_min).rem_euclid(world_size));
-                particle.position.y = world_min + ((particle.position.y - world_min).rem_euclid(world_size));
-            } else {
-                particle.position.x = particle.position.x.clamp(-2.0, 2.0);
-                particle.position.y = particle.position.y.clamp(-2.0, 2.0);
-            }
-            particle.position.z = 0.0;
-        });
+        self.particles
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(i, particle)| {
+                // Update velocity with force and friction
+                particle.velocity += self.force_buffer[i] * dt;
+                particle.velocity *= friction.powf(dt * 60.0); // Friction adjusted for frame rate
+
+                // Update position
+                particle.position += particle.velocity * dt;
+
+                // Handle boundaries with improved wrapping
+                if wrap {
+                    let world_size = 4.0;
+                    let world_min = -2.0;
+
+                    // Proper modulo wrapping that handles negative numbers correctly
+                    particle.position.x =
+                        world_min + ((particle.position.x - world_min).rem_euclid(world_size));
+                    particle.position.y =
+                        world_min + ((particle.position.y - world_min).rem_euclid(world_size));
+                } else {
+                    particle.position.x = particle.position.x.clamp(-2.0, 2.0);
+                    particle.position.y = particle.position.y.clamp(-2.0, 2.0);
+                }
+                particle.position.z = 0.0;
+            });
     }
 
     pub fn take_snapshot(&self) -> PhysicsSnapshot {
@@ -482,7 +529,9 @@ pub struct RainbowRingPositionSetter;
 impl PositionSetter for RainbowRingPositionSetter {
     fn set_position(&self, position: &mut Position, type_id: usize, n_types: usize) {
         let mut rng = rand::thread_rng();
-        let angle = (0.3 * rng.gen_range(-1.0..1.0) + type_id as f64) / n_types as f64 * 2.0 * std::f64::consts::PI;
+        let angle = (0.3 * rng.gen_range(-1.0..1.0) + type_id as f64) / n_types as f64
+            * 2.0
+            * std::f64::consts::PI;
         let radius = 0.7 + 0.02 * rng.gen_range(-1.0..1.0);
         position.x = angle.cos() * radius;
         position.y = angle.sin() * radius;
@@ -497,10 +546,10 @@ impl PositionSetter for ColorBattlePositionSetter {
         let mut rng = rand::thread_rng();
         let center_angle = type_id as f64 / n_types as f64 * 2.0 * std::f64::consts::PI;
         let center_radius = 0.5;
-        
+
         let angle = rng.gen_range(0.0..2.0 * std::f64::consts::PI);
         let radius = rng.gen_range(0.0..0.1);
-        
+
         position.x = center_radius * center_angle.cos() + angle.cos() * radius;
         position.y = center_radius * center_angle.sin() + angle.sin() * radius;
         position.z = 0.0;
@@ -515,9 +564,11 @@ impl PositionSetter for ColorWheelPositionSetter {
         let center_angle = type_id as f64 / n_types as f64 * 2.0 * std::f64::consts::PI;
         let center_radius = 0.3;
         let individual_radius = 0.2;
-        
-        position.x = center_radius * center_angle.cos() + rng.gen_range(-1.0..1.0) * individual_radius;
-        position.y = center_radius * center_angle.sin() + rng.gen_range(-1.0..1.0) * individual_radius;
+
+        position.x =
+            center_radius * center_angle.cos() + rng.gen_range(-1.0..1.0) * individual_radius;
+        position.y =
+            center_radius * center_angle.sin() + rng.gen_range(-1.0..1.0) * individual_radius;
         position.z = 0.0;
     }
 }
@@ -541,10 +592,10 @@ impl PositionSetter for SpiralPositionSetter {
         let max_rotations = 2.0;
         let f = rng.gen_range(0.0..1.0);
         let angle = max_rotations * 2.0 * std::f64::consts::PI * f;
-        
+
         let spread = 0.5 * f.min(0.2);
         let radius = 0.9 * f + spread * rng.gen_range(-1.0..1.0) * spread;
-        
+
         position.x = radius * angle.cos();
         position.y = radius * angle.sin();
         position.z = 0.0;
@@ -558,14 +609,15 @@ impl PositionSetter for RainbowSpiralPositionSetter {
         let mut rng = rand::thread_rng();
         let max_rotations = 2.0;
         let type_spread = 0.3 / n_types as f64;
-        let mut f = (type_id + 1) as f64 / (n_types + 2) as f64 + type_spread * rng.gen_range(-1.0..1.0);
+        let mut f =
+            (type_id + 1) as f64 / (n_types + 2) as f64 + type_spread * rng.gen_range(-1.0..1.0);
         f = f.clamp(0.0, 1.0);
-        
+
         let angle = max_rotations * 2.0 * std::f64::consts::PI * f;
-        
+
         let spread = 0.5 * f.min(0.2);
         let radius = 0.9 * f + spread * rng.gen_range(-1.0..1.0) * spread;
-        
+
         position.x = radius * angle.cos();
         position.y = radius * angle.sin();
         position.z = 0.0;
@@ -681,7 +733,13 @@ impl MatrixGenerator for ZeroMatrixGenerator {
 pub struct DefaultTypeSetter;
 
 impl TypeSetter for DefaultTypeSetter {
-    fn set_type(&self, _position: &Position, _velocity: &Velocity, _current_type: usize, n_types: usize) -> usize {
+    fn set_type(
+        &self,
+        _position: &Position,
+        _velocity: &Velocity,
+        _current_type: usize,
+        n_types: usize,
+    ) -> usize {
         let mut rng = rand::thread_rng();
         rng.gen_range(0..n_types)
     }
@@ -690,7 +748,13 @@ impl TypeSetter for DefaultTypeSetter {
 pub struct RandomTypeSetter;
 
 impl TypeSetter for RandomTypeSetter {
-    fn set_type(&self, _position: &Position, _velocity: &Velocity, _current_type: usize, n_types: usize) -> usize {
+    fn set_type(
+        &self,
+        _position: &Position,
+        _velocity: &Velocity,
+        _current_type: usize,
+        n_types: usize,
+    ) -> usize {
         let mut rng = rand::thread_rng();
         rng.gen_range(0..n_types)
     }
@@ -699,7 +763,13 @@ impl TypeSetter for RandomTypeSetter {
 pub struct Randomize10PercentTypeSetter;
 
 impl TypeSetter for Randomize10PercentTypeSetter {
-    fn set_type(&self, _position: &Position, _velocity: &Velocity, current_type: usize, n_types: usize) -> usize {
+    fn set_type(
+        &self,
+        _position: &Position,
+        _velocity: &Velocity,
+        current_type: usize,
+        n_types: usize,
+    ) -> usize {
         let mut rng = rand::thread_rng();
         if rng.gen_range(0.0..1.0) < 0.1 {
             Self::map_type(rng.gen_range(0.0..1.0), n_types)
@@ -718,7 +788,13 @@ impl Randomize10PercentTypeSetter {
 pub struct SlicesTypeSetter;
 
 impl TypeSetter for SlicesTypeSetter {
-    fn set_type(&self, position: &Position, _velocity: &Velocity, _current_type: usize, n_types: usize) -> usize {
+    fn set_type(
+        &self,
+        position: &Position,
+        _velocity: &Velocity,
+        _current_type: usize,
+        n_types: usize,
+    ) -> usize {
         Self::map_type(position.x, n_types)
     }
 }
@@ -732,7 +808,13 @@ impl SlicesTypeSetter {
 pub struct OnionTypeSetter;
 
 impl TypeSetter for OnionTypeSetter {
-    fn set_type(&self, position: &Position, _velocity: &Velocity, _current_type: usize, n_types: usize) -> usize {
+    fn set_type(
+        &self,
+        position: &Position,
+        _velocity: &Velocity,
+        _current_type: usize,
+        n_types: usize,
+    ) -> usize {
         let center = Vector3::new(0.0, 0.0, 0.0);
         let distance = (position - center).norm() * 2.0;
         Self::map_type(distance, n_types)
@@ -748,7 +830,13 @@ impl OnionTypeSetter {
 pub struct RotateTypeSetter;
 
 impl TypeSetter for RotateTypeSetter {
-    fn set_type(&self, _position: &Position, _velocity: &Velocity, current_type: usize, n_types: usize) -> usize {
+    fn set_type(
+        &self,
+        _position: &Position,
+        _velocity: &Velocity,
+        current_type: usize,
+        n_types: usize,
+    ) -> usize {
         (current_type + 1) % n_types
     }
 }
@@ -756,7 +844,13 @@ impl TypeSetter for RotateTypeSetter {
 pub struct FlipTypeSetter;
 
 impl TypeSetter for FlipTypeSetter {
-    fn set_type(&self, _position: &Position, _velocity: &Velocity, current_type: usize, n_types: usize) -> usize {
+    fn set_type(
+        &self,
+        _position: &Position,
+        _velocity: &Velocity,
+        current_type: usize,
+        n_types: usize,
+    ) -> usize {
         n_types - 1 - current_type
     }
 }
@@ -764,7 +858,13 @@ impl TypeSetter for FlipTypeSetter {
 pub struct MoreOfFirstTypeSetter;
 
 impl TypeSetter for MoreOfFirstTypeSetter {
-    fn set_type(&self, _position: &Position, _velocity: &Velocity, _current_type: usize, n_types: usize) -> usize {
+    fn set_type(
+        &self,
+        _position: &Position,
+        _velocity: &Velocity,
+        _current_type: usize,
+        n_types: usize,
+    ) -> usize {
         let mut rng = rand::thread_rng();
         let value = rng.gen_range(0.0..1.0) * rng.gen_range(0.0..1.0);
         Self::map_type(value, n_types)
@@ -780,7 +880,13 @@ impl MoreOfFirstTypeSetter {
 pub struct KillStillTypeSetter;
 
 impl TypeSetter for KillStillTypeSetter {
-    fn set_type(&self, _position: &Position, velocity: &Velocity, current_type: usize, n_types: usize) -> usize {
+    fn set_type(
+        &self,
+        _position: &Position,
+        velocity: &Velocity,
+        current_type: usize,
+        n_types: usize,
+    ) -> usize {
         if velocity.norm() < 0.01 {
             n_types - 1
         } else {
@@ -826,12 +932,12 @@ impl SpatialGrid {
     fn insert(&mut self, particle_idx: usize, position: &Position) {
         let cell_idx = self.get_cell_index(position.x, position.y);
         self.grid[cell_idx].push(particle_idx);
-        
+
         // For wrapping boundaries, also insert into wrapped neighbor cells if near edges
         // This ensures particles near boundaries can interact with particles on the opposite side
         let world_size = 4.0;
         let edge_threshold = 0.1; // Distance from edge to consider for wrapping
-        
+
         // Check if near left/right edges
         if position.x < -2.0 + edge_threshold {
             // Near left edge, also insert to right side
@@ -848,7 +954,7 @@ impl SpatialGrid {
                 self.grid[wrapped_cell_idx].push(particle_idx);
             }
         }
-        
+
         // Check if near top/bottom edges
         if position.y < -2.0 + edge_threshold {
             // Near bottom edge, also insert to top side
@@ -869,24 +975,24 @@ impl SpatialGrid {
 
     fn get_neighbors(&self, position: &Position, range: f64, neighbors: &mut Vec<usize>) {
         neighbors.clear();
-        
+
         // Calculate the grid cells that need to be searched
         let min_x = position.x - range;
         let max_x = position.x + range;
         let min_y = position.y - range;
         let max_y = position.y + range;
-        
+
         // Convert to grid coordinates and handle wrapping
         let shifted_min_x = min_x + 2.0;
         let shifted_max_x = max_x + 2.0;
         let shifted_min_y = min_y + 2.0;
         let shifted_max_y = max_y + 2.0;
-        
+
         let min_gx = (shifted_min_x / self.cell_size).floor() as i32;
         let max_gx = (shifted_max_x / self.cell_size).floor() as i32;
         let min_gy = (shifted_min_y / self.cell_size).floor() as i32;
         let max_gy = (shifted_max_y / self.cell_size).floor() as i32;
-        
+
         // Search all relevant cells, including wrapped ones
         for gy in min_gy..=max_gy {
             for gx in min_gx..=max_gx {
@@ -898,7 +1004,7 @@ impl SpatialGrid {
                 } else {
                     gx
                 } as usize;
-                
+
                 let wrapped_gy = if gy < 0 {
                     (gy + self.grid_size as i32) % self.grid_size as i32
                 } else if gy >= self.grid_size as i32 {
@@ -906,7 +1012,7 @@ impl SpatialGrid {
                 } else {
                     gy
                 } as usize;
-                
+
                 if wrapped_gx < self.grid_size && wrapped_gy < self.grid_size {
                     let cell_idx = wrapped_gy * self.grid_size + wrapped_gx;
                     neighbors.extend(&self.grid[cell_idx]);

@@ -1,7 +1,7 @@
-use wgpu::{Device, Buffer, BufferUsages};
-use nalgebra::{Matrix4, Vector3};
-use crate::shaders::{ParticleShader, ParticleVertex, hsv_to_rgb};
 use crate::physics::Position;
+use crate::shaders::{hsv_to_rgb, ParticleShader, ParticleVertex};
+use nalgebra::{Matrix4, Vector3};
+use wgpu::{Buffer, BufferUsages, Device};
 
 pub struct ParticleRenderer {
     vertex_buffer: Option<Buffer>,
@@ -30,7 +30,7 @@ impl ParticleRenderer {
         }
 
         let vertex_count = positions.len() * 6; // 6 vertices per particle
-        
+
         // Resize buffer if needed
         if self.vertex_capacity < vertex_count {
             self.vertex_capacity = (vertex_count * 2).max(6000); // Account for 6 vertices per particle
@@ -46,20 +46,19 @@ impl ParticleRenderer {
         let max_types = types.iter().max().copied().unwrap_or(0) + 1;
         let quad_vertices = [
             [-1.0, -1.0], // bottom-left
-            [ 1.0, -1.0], // bottom-right 
-            [-1.0,  1.0], // top-left
-            [ 1.0, -1.0], // bottom-right (shared)
-            [ 1.0,  1.0], // top-right
-            [-1.0,  1.0], // top-left (shared)
+            [1.0, -1.0],  // bottom-right
+            [-1.0, 1.0],  // top-left
+            [1.0, -1.0],  // bottom-right (shared)
+            [1.0, 1.0],   // top-right
+            [-1.0, 1.0],  // top-left (shared)
         ];
-        
+
         let mut vertices = Vec::with_capacity(positions.len() * 6);
-        for ((pos, _vel), &particle_type) in positions.iter()
-            .zip(velocities.iter())
-            .zip(types.iter())
+        for ((pos, _vel), &particle_type) in
+            positions.iter().zip(velocities.iter()).zip(types.iter())
         {
             let color = palette.get_color(particle_type, max_types);
-            
+
             // Create 6 vertices for this particle (2 triangles)
             for &quad_vertex in &quad_vertices {
                 vertices.push(ParticleVertex {
@@ -75,11 +74,7 @@ impl ParticleRenderer {
         // Upload to GPU
         if let Some(ref buffer) = self.vertex_buffer {
             if !vertices.is_empty() {
-                queue.write_buffer(
-                    buffer,
-                    0,
-                    bytemuck::cast_slice(&vertices),
-                );
+                queue.write_buffer(buffer, 0, bytemuck::cast_slice(&vertices));
             }
         }
     }
@@ -95,10 +90,10 @@ impl ParticleRenderer {
             render_pass.set_pipeline(&shader.render_pipeline);
             render_pass.set_bind_group(0, &shader.bind_group, &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            
+
             // If tiling is enabled, draw 9 instances (3x3 grid), otherwise draw 1 instance
             let instance_count = if show_tiling { 9 } else { 1 };
-            
+
             // Draw 6 vertices per particle (2 triangles making a quad)
             render_pass.draw(0..(particle_count * 6) as u32, 0..instance_count);
         }
@@ -179,36 +174,36 @@ impl HexPalette {
     pub fn load_from_file(file_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let content = std::fs::read_to_string(file_path)?;
         let mut colors = Vec::new();
-        
+
         for line in content.lines() {
             let line = line.trim();
             if line.is_empty() {
                 continue;
             }
-            
+
             // Parse hex color (expecting 6 characters: RRGGBB)
             if line.len() != 6 {
                 continue;
             }
-            
+
             let r = u8::from_str_radix(&line[0..2], 16)? as f32 / 255.0;
             let g = u8::from_str_radix(&line[2..4], 16)? as f32 / 255.0;
             let b = u8::from_str_radix(&line[4..6], 16)? as f32 / 255.0;
-            
+
             colors.push(Color { r, g, b, a: 1.0 });
         }
-        
+
         if colors.is_empty() {
             return Err("No valid colors found in palette file".into());
         }
-        
+
         // Extract name from file path
         let file_name = std::path::Path::new(file_path)
             .file_stem()
             .and_then(|name| name.to_str())
             .unwrap_or("Unknown")
             .to_string();
-        
+
         Ok(HexPalette {
             colors,
             name: file_name,
@@ -257,26 +252,34 @@ impl Camera {
         self.size = self.size + (self.target_size - self.size) * smoothness;
     }
 
-    pub fn zoom(&mut self, mouse_x: f64, mouse_y: f64, zoom_factor: f64, scale_factor: f64, logical_width: u32, logical_height: u32) {
+    pub fn zoom(
+        &mut self,
+        mouse_x: f64,
+        mouse_y: f64,
+        zoom_factor: f64,
+        scale_factor: f64,
+        logical_width: u32,
+        logical_height: u32,
+    ) {
         // Convert mouse position to world coordinates using DPI-aware logic
         let aspect_ratio = logical_width as f64 / logical_height as f64;
-        
+
         // Mouse coordinates are in physical pixels, convert to logical
         let logical_mouse_x = mouse_x / scale_factor;
         let logical_mouse_y = mouse_y / scale_factor;
-        
+
         // Normalize mouse coordinates to [-0.5, 0.5] using logical size
         let mouse_x_norm = (logical_mouse_x / logical_width as f64) - 0.5;
         let mouse_y_norm = (logical_mouse_y / logical_height as f64) - 0.5;
 
         // Calculate new size with zoom limits
         let new_size = self.target_size * zoom_factor;
-        
+
         // Zoom limits: min 0.01 (very zoomed in), max 20.0 (much further zoomed out)
         let min_zoom = 0.01;
         let max_zoom = 20.0;
         let clamped_size = new_size.clamp(min_zoom, max_zoom);
-        
+
         // Only proceed if zoom is within limits
         if clamped_size != self.target_size {
             let size_diff = clamped_size - self.target_size;
@@ -295,26 +298,26 @@ impl Camera {
         // Calculate new position
         let new_x = self.target_position.x + delta_x * self.target_size;
         let new_y = self.target_position.y + delta_y * self.target_size;
-        
+
         // Apply strict bounds checking
         self.apply_position_bounds(new_x, new_y);
     }
-    
+
     fn apply_position_bounds(&mut self, new_x: f64, new_y: f64) {
         // World bounds are -2.0 to 2.0
         let world_min = -2.0;
         let world_max = 2.0;
         let world_size = world_max - world_min; // = 4.0
-        
+
         // Camera should never be more than half the world width from the simulation
         let max_distance = world_size * 0.5; // = 2.0
-        
+
         // Calculate the maximum allowed camera bounds
         let min_camera_x = world_min - max_distance; // = -4.0
-        let max_camera_x = world_max + max_distance;  // = 4.0
-        let min_camera_y = world_min - max_distance; // = -4.0  
-        let max_camera_y = world_max + max_distance;  // = 4.0
-        
+        let max_camera_x = world_max + max_distance; // = 4.0
+        let min_camera_y = world_min - max_distance; // = -4.0
+        let max_camera_y = world_max + max_distance; // = 4.0
+
         // Clamp camera position to strict bounds
         self.target_position.x = new_x.clamp(min_camera_x, max_camera_x);
         self.target_position.y = new_y.clamp(min_camera_y, max_camera_y);
@@ -323,7 +326,8 @@ impl Camera {
     pub fn reset(&mut self, fit_to_window: bool, aspect_ratio: f32) {
         self.target_position = Vector3::new(0.0, 0.0, 0.0);
         if fit_to_window {
-            self.target_size = (8.0_f32.min(aspect_ratio * 8.0) as f64).min(8.0 / aspect_ratio as f64);
+            self.target_size =
+                (8.0_f32.min(aspect_ratio * 8.0) as f64).min(8.0 / aspect_ratio as f64);
         } else {
             self.target_size = 8.0;
         }
