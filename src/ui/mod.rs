@@ -4,6 +4,7 @@ pub struct SelectionManager<T> {
 }
 
 pub struct NamedItem<T> {
+    pub name: String,
     pub object: T,
 }
 
@@ -11,7 +12,7 @@ impl<T> SelectionManager<T> {
     pub fn new(items: Vec<(String, T)>) -> Self {
         let items = items
             .into_iter()
-            .map(|(_, object)| NamedItem { object })
+            .map(|(name, object)| NamedItem { name, object })
             .collect();
         Self {
             items,
@@ -21,6 +22,24 @@ impl<T> SelectionManager<T> {
 
     pub fn get_active(&self) -> &T {
         &self.items[self.active_index].object
+    }
+
+    pub fn get_active_name(&self) -> &str {
+        &self.items[self.active_index].name
+    }
+
+    pub fn get_active_index(&self) -> usize {
+        self.active_index
+    }
+
+    pub fn get_item_names(&self) -> Vec<&str> {
+        self.items.iter().map(|item| item.name.as_str()).collect()
+    }
+
+    pub fn set_active(&mut self, index: usize) {
+        if index < self.items.len() {
+            self.active_index = index;
+        }
     }
 }
 

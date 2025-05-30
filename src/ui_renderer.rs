@@ -181,6 +181,7 @@ pub fn render_physics_panel(
                     local_matrix,
                     physics,
                     _matrix_generators,
+                    _palettes.get_active().as_ref(),
                 );
 
                 ui.separator();
@@ -222,6 +223,7 @@ pub fn render_matrix_editor(
     local_matrix: &mut Vec<Vec<f64>>,
     physics: &mut ExtendedPhysics,
     _matrix_generators: &mut SelectionManager<Box<dyn crate::physics::MatrixGenerator>>,
+    palette: &dyn rendering::Palette,
 ) {
     ui.heading("Interaction Matrix");
 
@@ -244,29 +246,78 @@ pub fn render_matrix_editor(
         let spacing = 1.0;
         let cell_size = 50.0;
         let matrix_width = matrix_size as f32 * (cell_size + spacing) - spacing;
+        let dot_radius = 6.0;
         
         ui.allocate_ui_with_layout(
-            egui::Vec2::new(matrix_width, matrix_width + 40.0),
+            egui::Vec2::new(matrix_width + cell_size, matrix_width + cell_size + 40.0),
             egui::Layout::top_down(egui::Align::Center),
             |ui| {
                 ui.label("Click and drag to edit values");
-                ui.small("Green = Attraction, Red = Repulsion");
+                ui.small("Purple = Repulsion, Blue = Weak, Green = Moderate, Yellow = Strong Attraction");
                 
+                // Top border dots (columns)
+                ui.horizontal(|ui| {
+                    ui.add_space(cell_size); // Top-left corner empty
+                    for j in 0..matrix_size {
+                        let color = palette.get_color(j, matrix_size);
+                        let (rect, _resp) = ui.allocate_exact_size(
+                            egui::Vec2::new(cell_size, cell_size / 2.0),
+                            egui::Sense::hover(),
+                        );
+                        let center = rect.center();
+                        ui.painter().circle_filled(center, dot_radius, egui::Color32::from_rgb(
+                            (color.r * 255.0) as u8,
+                            (color.g * 255.0) as u8,
+                            (color.b * 255.0) as u8,
+                        ));
+                    }
+                });
                 // Display a grid representing the matrix
                 (0..matrix_size).for_each(|i| {
                     ui.horizontal(|ui| {
-                        (0..matrix_size).for_each(|j| {
+                        // Left border dot (row)
+                        let color = palette.get_color(i, matrix_size);
+                        let (rect, _resp) = ui.allocate_exact_size(
+                            egui::Vec2::new(cell_size / 2.0, cell_size),
+                            egui::Sense::hover(),
+                        );
+                        let center = rect.center();
+                        ui.painter().circle_filled(center, dot_radius, egui::Color32::from_rgb(
+                            (color.r * 255.0) as u8,
+                            (color.g * 255.0) as u8,
+                            (color.b * 255.0) as u8,
+                        ));
+                        for j in 0..matrix_size {
                             let value = local_matrix[i][j];
                             
-                            // Color based on the interaction strength
-                            let color = if value > 0.0 {
-                                // Positive (attraction) - green
-                                let intensity = (value.abs().min(1.0) * 255.0) as u8;
-                                egui::Color32::from_rgb(0, intensity, 0)
-                            } else {
-                                // Negative (repulsion) - red
-                                let intensity = (value.abs().min(1.0) * 255.0) as u8;
-                                egui::Color32::from_rgb(intensity, 0, 0)
+                            // Custom color scheme: yellow -> orange -> red -> purple -> blue -> dark blue
+                            let t = 1.0 - (value + 1.0) as f32 / 2.0; // Reverse: -1..1 to 1..0
+                            let color = {
+                                // Color stops (as (r,g,b))
+                                let stops = [
+                                    (246, 255,  87),  // Yellow
+                                    (255, 177,  78),  // Orange
+                                    (255, 106,  78),  // Red
+                                    (139,  78, 155),  // Purple
+                                    ( 59,  59, 155),  // Blue
+                                    (  0,  43,  54),  // Dark Blue
+                                ];
+                                let n = stops.len() - 1;
+                                let scaled = t * n as f32;
+                                let idx = scaled.floor() as usize;
+                                let frac = scaled - idx as f32;
+                                let (r, g, b) = if idx < n {
+                                    let (r1, g1, b1) = stops[idx];
+                                    let (r2, g2, b2) = stops[idx + 1];
+                                    (
+                                        (r1 as f32 + (r2 as f32 - r1 as f32) * frac) as u8,
+                                        (g1 as f32 + (g2 as f32 - g1 as f32) * frac) as u8,
+                                        (b1 as f32 + (b2 as f32 - b1 as f32) * frac) as u8,
+                                    )
+                                } else {
+                                    stops[n]
+                                };
+                                egui::Color32::from_rgb(r, g, b)
                             };
                             
                             // Create a frame with the color background
@@ -301,14 +352,14 @@ pub fn render_matrix_editor(
                                     }
                                 );
                             });
-                        });
+                        }
                     });
                 });
             }
         );
     }
 
-    // Matrix controls
+    // Matrix size control
     ui.horizontal(|ui| {
         ui.label("Matrix Size:");
         let mut matrix_size_input = matrix_size as i32;
@@ -322,18 +373,48 @@ pub fn render_matrix_editor(
         {
             let new_size = matrix_size_input.max(2) as usize;
             physics.set_matrix_size(new_size);
+            println!("Set matrix size to {}x{}", new_size, new_size);
         }
     });
-
+    
+    // Matrix generator selection
+    ui.horizontal(|ui| {
+        ui.label("Generator:");
+        let current_name = _matrix_generators.get_active_name().to_string();
+        let names = _matrix_generators.get_item_names();
+        
+        let mut selected_index = _matrix_generators.get_active_index();
+        let mut changed = false;
+        egui::ComboBox::from_id_source("matrix_generator")
+            .selected_text(&current_name)
+            .show_ui(ui, |ui| {
+                for (i, name) in names.iter().enumerate() {
+                    if ui.selectable_label(i == selected_index, *name).clicked() {
+                        selected_index = i;
+                        changed = true;
+                    }
+                }
+            });
+        
+        if changed {
+            _matrix_generators.set_active(selected_index);
+            println!("Changed matrix generator to: {}", _matrix_generators.get_active_name());
+        }
+    });
+    
+    // Matrix controls
     ui.horizontal(|ui| {
         if ui.button("Generate Matrix").clicked() {
             physics.generate_matrix_with_generator(_matrix_generators.get_active().as_ref());
+            // Update local copy using iterators
             local_matrix.iter_mut().enumerate().for_each(|(i, row)| {
                 row.iter_mut().enumerate().for_each(|(j, val)| {
                     *val = physics.matrix.get(i, j);
                 });
             });
+            println!("Generated matrix with {}", _matrix_generators.get_active_name());
         }
+        
         if ui.button("Zero Matrix").clicked() {
             local_matrix.iter_mut().enumerate().for_each(|(i, row)| {
                 row.iter_mut().enumerate().for_each(|(j, val)| {
@@ -352,13 +433,64 @@ pub fn render_particle_setup(
     _type_setters: &mut SelectionManager<Box<dyn crate::physics::TypeSetter>>,
 ) {
     ui.heading("Particle Setup");
-
+    
+    // Position setter selection
     ui.horizontal(|ui| {
+        ui.label("Position Mode:");
+        let current_name = _position_setters.get_active_name().to_string();
+        let names = _position_setters.get_item_names();
+        
+        let mut selected_index = _position_setters.get_active_index();
+        let mut changed = false;
+        egui::ComboBox::from_id_source("position_setter")
+            .selected_text(&current_name)
+            .show_ui(ui, |ui| {
+                for (i, name) in names.iter().enumerate() {
+                    if ui.selectable_label(i == selected_index, *name).clicked() {
+                        selected_index = i;
+                        changed = true;
+                    }
+                }
+            });
+        
+        if changed {
+            _position_setters.set_active(selected_index);
+            println!("Changed position setter to: {}", _position_setters.get_active_name());
+        }
+        
         if ui.button("Reset Positions").clicked() {
             physics.set_positions_with_setter(_position_setters.get_active().as_ref());
+            println!("Reset particle positions with {}", _position_setters.get_active_name());
         }
+    });
+    
+    // Type setter selection  
+    ui.horizontal(|ui| {
+        ui.label("Type Mode:");
+        let current_name = _type_setters.get_active_name().to_string();
+        let names = _type_setters.get_item_names();
+        
+        let mut selected_index = _type_setters.get_active_index();
+        let mut changed = false;
+        egui::ComboBox::from_id_source("type_setter")
+            .selected_text(&current_name)
+            .show_ui(ui, |ui| {
+                for (i, name) in names.iter().enumerate() {
+                    if ui.selectable_label(i == selected_index, *name).clicked() {
+                        selected_index = i;
+                        changed = true;
+                    }
+                }
+            });
+        
+        if changed {
+            _type_setters.set_active(selected_index);
+            println!("Changed type setter to: {}", _type_setters.get_active_name());
+        }
+        
         if ui.button("Reset Types").clicked() {
             physics.set_types_with_setter(_type_setters.get_active().as_ref());
+            println!("Reset particle types with {}", _type_setters.get_active_name());
         }
     });
 }
@@ -371,16 +503,46 @@ pub fn render_rendering_settings(
     camera_is_moving: bool,
 ) {
     ui.heading("Rendering Settings");
-
+    
+    // Particle size control in main panel
     ui.horizontal(|ui| {
         ui.label("Particle Size:");
-        ui.add(egui::Slider::new(&mut _app_settings.particle_size, 0.1..=1.0).step_by(0.01));
+        if ui.add(egui::Slider::new(&mut _app_settings.particle_size, 0.1..=1.0).step_by(0.01)).changed() {
+            // Particle size is updated automatically through the reference
+        }
     });
-
+    
+    // Palette selection in main panel
+    ui.horizontal(|ui| {
+        ui.label("Color Palette:");
+        let current_name = _palettes.get_active_name().to_string();
+        let names = _palettes.get_item_names();
+        
+        let mut selected_index = _palettes.get_active_index();
+        egui::ComboBox::from_id_source("palette")
+            .selected_text(&current_name)
+            .show_ui(ui, |ui| {
+                for (i, name) in names.iter().enumerate() {
+                    if ui.selectable_label(i == selected_index, *name).clicked() {
+                        selected_index = i;
+                    }
+                }
+            });
+        
+        if selected_index != _palettes.get_active_index() {
+            _palettes.set_active(selected_index);
+        }
+    });
+    
+    // Traces toggle
     ui.horizontal(|ui| {
         ui.label("Particle Traces:");
         if ui.checkbox(traces_user_enabled, "Enable [T]").changed() {
-            // Trace state will be updated after UI
+            // Update actual traces state unless camera is moving
+            if !camera_is_moving {
+                // We need to update self.traces, but we can't borrow self mutably here
+                // We'll handle this after the UI section
+            }
         }
         if camera_is_moving && *traces_user_enabled {
             ui.label("(disabled during panning)");
