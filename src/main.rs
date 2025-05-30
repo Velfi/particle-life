@@ -3,6 +3,8 @@ mod rendering;
 mod shaders;
 mod ui;
 mod app_settings;
+mod gpu_physics;
+mod instanced_renderer;
 
 use winit::{
     event::{Event, WindowEvent, KeyEvent, MouseButton, ElementState},
@@ -32,6 +34,8 @@ use physics::{
 use rendering::{
     ParticleRenderer, Camera, NaturalRainbowPalette, SimpleRainbowPalette, SunsetPalette, HexPalette, Palette
 };
+use gpu_physics::GpuPhysicsSystem;
+use instanced_renderer::InstancedParticleRenderer;
 use shaders::{ParticleShader, UniformData, FadeShader};
 use ui::{SelectionManager, Clock, Loop};
 use app_settings::AppSettings;
@@ -55,6 +59,9 @@ struct Application {
     
     // Physics
     physics: ExtendedPhysics,
+    gpu_physics: GpuPhysicsSystem,
+    instanced_renderer: InstancedParticleRenderer,
+    use_gpu_physics: bool,
     physics_snapshot: PhysicsSnapshot,
     physics_loop: Loop,
     new_snapshot_available: Arc<Mutex<bool>>,
@@ -221,6 +228,12 @@ impl Application {
             Box::new(DefaultPositionSetter),
             Box::new(DefaultMatrixGenerator),
         );
+        
+        // Initialize GPU physics system
+        let max_particles = 200000;
+        let gpu_physics = GpuPhysicsSystem::new(&device, max_particles);
+        let instanced_renderer = InstancedParticleRenderer::new(&device, surface_format, max_particles);
+        
         let physics_snapshot = PhysicsSnapshot::new();
         let physics_loop = Loop::new();
         let new_snapshot_available = Arc::new(Mutex::new(false));
@@ -302,6 +315,9 @@ impl Application {
             world_texture_view,
             world_texture_id,
             physics,
+            gpu_physics,
+            instanced_renderer,
+            use_gpu_physics: true, // Start with GPU physics enabled
             physics_snapshot,
             physics_loop,
             new_snapshot_available,
@@ -359,6 +375,10 @@ impl Application {
         // Take initial snapshot
         self.physics_snapshot = self.physics.take_snapshot();
         
+        // Initialize GPU physics with CPU particle data
+        self.gpu_physics.initialize_particles(&self.queue, &self.physics.particles);
+        self.gpu_physics.update_matrix(&self.queue, &self.physics.matrix);
+        
         // Initialize local matrix copy
         let matrix_size = self.physics.matrix.size();
         self.local_matrix = vec![vec![0.0; matrix_size]; matrix_size];
@@ -369,7 +389,7 @@ impl Application {
             });
         });
         
-        // Buffer initial particle data
+        // Buffer initial particle data (for CPU renderer fallback)
         self.particle_renderer.buffer_particle_data(
             &self.device,
             &self.queue,
@@ -639,6 +659,7 @@ impl Application {
             } else {
                 self.physics.update();
             }
+            
             let physics_time = physics_start.elapsed().as_micros() as f64 / 1000.0; // Convert to milliseconds
             
             // Track physics timing for display
