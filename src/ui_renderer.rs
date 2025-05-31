@@ -18,30 +18,6 @@ use crate::rendering;
 use crate::ui::{Clock, SelectionManager};
 
 /// Renders the main UI overlay
-/// 
-/// Parameters:
-/// - ctx: egui context for rendering
-/// - world_texture_id: Texture ID for the simulation view
-/// - config_width/height: Window dimensions
-/// - show_gui: Whether to show the UI
-/// - show_*_window: Window visibility flags
-/// - tile_fade_strength: Strength of tile fade effect
-/// - traces_user_enabled: Whether motion trails are enabled
-/// - camera_is_moving: Whether camera is currently moving
-/// - physics_loop_pause: Whether simulation is paused
-/// - physics_snapshot: Current physics state
-/// - render_clock: Frame timing information
-/// - app_settings: Application settings
-/// - palettes: Color palette selection
-/// - position_setters: Particle position pattern selection
-/// - type_setters: Particle type distribution selection
-/// - matrix_generators: Interaction matrix pattern selection
-/// - local_matrix: Current interaction matrix
-/// - physics: Physics simulation state
-/// - physics_time_avg: Average physics update time
-/// - trace_fade: Motion trail fade strength
-/// - cursor_size: Mouse interaction radius
-/// - cursor_strength: Mouse interaction force
 #[allow(clippy::too_many_arguments)]
 pub fn render_ui(
     ctx: &egui::Context,
@@ -49,8 +25,6 @@ pub fn render_ui(
     config_width: f32,
     config_height: f32,
     show_gui: bool,
-    show_graphics_window: &mut bool,
-    show_controls_window: &mut bool,
     show_about_window: &mut bool,
     tile_fade_strength: &mut f32,
     traces_user_enabled: &mut bool,
@@ -58,11 +32,11 @@ pub fn render_ui(
     physics_loop_pause: &mut bool,
     physics_snapshot: &PhysicsSnapshot,
     render_clock: &Clock,
-    _app_settings: &mut AppSettings,
-    _palettes: &mut SelectionManager<Box<dyn rendering::Palette>>,
-    _position_setters: &mut SelectionManager<Box<dyn crate::physics::PositionSetter>>,
-    _type_setters: &mut SelectionManager<Box<dyn crate::physics::TypeSetter>>,
-    _matrix_generators: &mut SelectionManager<Box<dyn crate::physics::MatrixGenerator>>,
+    app_settings: &mut AppSettings,
+    palettes: &mut SelectionManager<Box<dyn rendering::Palette>>,
+    position_setters: &mut SelectionManager<Box<dyn crate::physics::PositionSetter>>,
+    type_setters: &mut SelectionManager<Box<dyn crate::physics::TypeSetter>>,
+    matrix_generators: &mut SelectionManager<Box<dyn crate::physics::MatrixGenerator>>,
     local_matrix: &mut Vec<Vec<f64>>,
     physics: &mut ExtendedPhysics,
     physics_time_avg: f64,
@@ -87,9 +61,7 @@ pub fn render_ui(
 
     render_menu_bar(
         ctx,
-        show_controls_window,
         show_about_window,
-        show_graphics_window,
     );
     render_physics_panel(
         ctx,
@@ -99,11 +71,11 @@ pub fn render_ui(
         physics_snapshot,
         local_matrix,
         physics,
-        _matrix_generators,
-        _position_setters,
-        _type_setters,
-        _app_settings,
-        _palettes,
+        matrix_generators,
+        position_setters,
+        type_setters,
+        app_settings,
+        palettes,
         traces_user_enabled,
         camera_is_moving,
         cursor_size,
@@ -121,9 +93,7 @@ pub fn render_ui(
 /// - View dropdown with Graphics Settings and Hide GUI
 pub fn render_menu_bar(
     ctx: &egui::Context,
-    show_controls_window: &mut bool,
     show_about_window: &mut bool,
-    show_graphics_window: &mut bool,
 ) {
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
         egui::menu::bar(ui, |ui| {
@@ -264,7 +234,6 @@ pub fn render_physics_panel(
                     camera_is_moving,
                     tile_fade_strength,
                     trace_fade,
-                    render_clock,
                 );
 
                 ui.separator();
@@ -612,7 +581,6 @@ pub fn render_rendering_settings(
     camera_is_moving: bool,
     tile_fade_strength: &mut f32,
     trace_fade: &mut f32,
-    render_clock: &Clock,
 ) {
     ui.heading("Rendering Settings");
     
@@ -788,15 +756,4 @@ pub fn render_type_distribution(
             physics.set_type_count_equal();
         }
     }
-}
-
-pub fn render_quick_controls(ui: &mut egui::Ui) {
-    ui.label("Quick Controls:");
-    ui.label("[Space] - Play/Pause");
-    ui.label("[P] - Reset positions");
-    ui.label("[C] - Reset types");
-    ui.label("[M] - Generate new matrix");
-    ui.label("[B] - Toggle boundaries");
-    ui.label("[T] - Toggle traces");
-    ui.label("[ESC] - Toggle GUI");
 }

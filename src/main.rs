@@ -84,87 +84,151 @@ use ui::{Clock, Loop, SelectionManager};
 /// - Configuration and settings
 struct Application {
     // Core GPU and windowing components
-    window: Arc<winit::window::Window>,        // Main application window
-    surface: Arc<Surface<'static>>,            // GPU surface for rendering
-    device: Arc<wgpu::Device>,                 // GPU device handle
-    queue: Arc<wgpu::Queue>,                   // GPU command queue
-    config: SurfaceConfiguration,              // Surface configuration settings
+
+    /// Main application window
+    window: Arc<winit::window::Window>,
+    /// GPU surface for rendering
+    surface: Arc<Surface<'static>>,
+    /// GPU device handle
+    device: Arc<wgpu::Device>,
+    /// GPU command queue
+    queue: Arc<wgpu::Queue>,
+    /// Surface configuration settings
+    config: SurfaceConfiguration,
 
     // Rendering system components
-    particle_renderer: ParticleRenderer,       // Handles particle mesh generation and rendering
-    particle_shader: ParticleShader,           // GPU shader for particle rendering
-    fade_shader: FadeShader,                   // GPU shader for trail fade effects
-    camera: Camera,                            // 2D camera for world view
-    world_texture: wgpu::Texture,              // Offscreen texture for particle rendering
-    world_texture_view: wgpu::TextureView,     // View into the world texture
-    world_texture_id: egui::TextureId,         // Texture ID for UI display
+
+    /// Handles particle mesh generation and rendering
+    particle_renderer: ParticleRenderer,
+    /// GPU shader for particle rendering
+    particle_shader: ParticleShader,
+    /// GPU shader for trail fade effects
+    fade_shader: FadeShader,
+    /// 2D camera for world view
+    camera: Camera,
+    /// Offscreen texture for particle rendering
+    world_texture: wgpu::Texture,
+    /// View into the world texture
+    world_texture_view: wgpu::TextureView,
+    /// Texture ID for UI display
+    world_texture_id: egui::TextureId,
 
     // Physics simulation components
-    physics: ExtendedPhysics,                  // Main physics engine and particle state
-    physics_snapshot: PhysicsSnapshot,         // Immutable snapshot of physics state for rendering
-    physics_loop: Loop,                        // Physics loop timing and control
-    new_snapshot_available: Arc<Mutex<bool>>,  // Thread-safe flag for physics updates
+
+    /// Main physics engine and particle state
+    physics: ExtendedPhysics,
+    /// Immutable snapshot of physics state for rendering
+    physics_snapshot: PhysicsSnapshot,
+    /// Physics loop timing and control
+    physics_loop: Loop,
+    /// Thread-safe flag for physics updates
+    new_snapshot_available: Arc<Mutex<bool>>,
 
     // UI system components
-    egui_ctx: egui::Context,                   // Main UI context for immediate mode GUI
-    egui_state: State,                         // UI input/event state management
-    egui_renderer: egui_wgpu::Renderer,       // GPU-based UI renderer
+
+    /// Main UI context for immediate mode GUI
+    egui_ctx: egui::Context,
+    /// UI input/event state management
+    egui_state: State,
+    /// GPU-based UI renderer
+    egui_renderer: egui_wgpu::Renderer,
 
     // UI state and visibility flags
-    show_gui: bool,                            // Master GUI visibility toggle
-    show_graphics_window: bool,                // Graphics settings window visibility
-    show_controls_window: bool,                // Controls help window visibility
-    show_about_window: bool,                   // About dialog visibility
-    tile_fade_strength: f32,                   // Strength of tile boundary fade effect
-    traces: bool,                              // Current trail rendering state
-    trace_fade: f32,                           // Trail fade factor (0.0-1.0)
-    traces_user_enabled: bool,                 // User's desired trail setting
-    camera_is_moving: bool,                    // Whether camera is currently in motion
-    camera_movement_timer: std::time::Instant, // Timer to detect when camera movement stops
-    prev_camera_position: nalgebra::Vector3<f64>, // Previous camera position for movement detection
-    prev_camera_size: f64,                     // Previous camera size for zoom detection
+
+    /// Master GUI visibility toggle
+    show_gui: bool,
+    /// About dialog visibility
+    show_about_window: bool,
+    /// Strength of tile boundary fade effect
+    tile_fade_strength: f32,
+    /// Current trail rendering state
+    traces: bool,
+    /// Trail fade factor (0.0-1.0)
+    trace_fade: f32,
+    /// User's desired trail setting
+    traces_user_enabled: bool,
+    /// Whether camera is currently in motion
+    camera_is_moving: bool,
+    /// Timer to detect when camera movement stops
+    camera_movement_timer: std::time::Instant,
+    /// Previous camera position for movement detection
+    prev_camera_position: nalgebra::Vector3<f64>,
+    /// Previous camera size for zoom detection
+    prev_camera_size: f64,
 
     // Physics configuration state
-    local_matrix: Vec<Vec<f64>>,               // Local copy of interaction matrix for UI editing
+
+    /// Local copy of interaction matrix for UI editing
+    local_matrix: Vec<Vec<f64>>,
 
     // Configuration option managers
-    palettes: SelectionManager<Box<dyn rendering::Palette>>,           // Available color palettes
-    position_setters: SelectionManager<Box<dyn physics::PositionSetter>>, // Particle initial position patterns
-    matrix_generators: SelectionManager<Box<dyn physics::MatrixGenerator>>, // Interaction matrix generators
-    type_setters: SelectionManager<Box<dyn physics::TypeSetter>>,      // Particle type assignment methods
+
+    /// Available color palettes
+    palettes: SelectionManager<Box<dyn rendering::Palette>>,
+    /// Particle initial position patterns
+    position_setters: SelectionManager<Box<dyn physics::PositionSetter>>,
+    /// Interaction matrix generators
+    matrix_generators: SelectionManager<Box<dyn physics::MatrixGenerator>>,
+    /// Particle type assignment methods
+    type_setters: SelectionManager<Box<dyn physics::TypeSetter>>,
 
     // Performance and timing
-    render_clock: Clock,                       // Render loop timing control
+
+    /// Render loop timing control
+    render_clock: Clock,
 
     // Mouse input state
-    mouse_x: f64,                              // Current mouse X position
-    mouse_y: f64,                              // Current mouse Y position
-    pmouse_x: f64,                             // Previous mouse X position
-    pmouse_y: f64,                             // Previous mouse Y position
+
+    /// Current mouse X position
+    mouse_x: f64,
+    /// Current mouse Y position
+    mouse_y: f64,
+    /// Previous mouse X position
+    pmouse_x: f64,
+    /// Previous mouse Y position
+    pmouse_y: f64,
 
     // Input state tracking
-    keys_pressed: std::collections::HashSet<KeyCode>, // Currently pressed keyboard keys
-    left_mouse_pressed: bool,                  // Left mouse button state
-    right_mouse_pressed: bool,                 // Right mouse button state
-    middle_mouse_pressed: bool,                // Middle mouse button state
+
+    /// Currently pressed keyboard keys
+    keys_pressed: std::collections::HashSet<KeyCode>,
+    /// Left mouse button state
+    left_mouse_pressed: bool,
+    /// Right mouse button state
+    right_mouse_pressed: bool,
+    /// Middle mouse button state
+    middle_mouse_pressed: bool,
 
     // Frame-based input tracking
-    cursor_moved_last_frame: bool,             // Whether cursor moved in the last frame
+
+    /// Whether cursor moved in the last frame
+    cursor_moved_last_frame: bool,
 
     // Persistent application settings
-    app_settings: AppSettings,                 // User preferences and configuration
+
+    /// User preferences and configuration
+    app_settings: AppSettings,
 
     // Performance monitoring
-    physics_time_avg: f64,                     // Rolling average of physics computation time
-    physics_time_samples: Vec<f64>,            // Recent physics timing samples for averaging
+
+    /// Rolling average of physics computation time
+    physics_time_avg: f64,
+    /// Recent physics timing samples for averaging
+    physics_time_samples: Vec<f64>,
 
     // Debug and diagnostics
-    last_debug_time: std::time::Instant,       // Timer for periodic debug output
+
+    /// Timer for periodic debug output
+    last_debug_time: std::time::Instant,
 
     // Mouse-world interaction system
-    cursor_world_position: nalgebra::Vector3<f64>, // Cursor position in world coordinates
-    cursor_size: f64,                          // Radius of cursor influence area
-    cursor_strength: f64,                      // Force strength applied by cursor interaction
+
+    /// Cursor position in world coordinates
+    cursor_world_position: nalgebra::Vector3<f64>,
+    /// Radius of cursor influence area
+    cursor_size: f64,
+    /// Force strength applied by cursor interaction
+    cursor_strength: f64,
 }
 
 impl Application {
@@ -215,8 +279,6 @@ impl Application {
             egui_state,
             egui_renderer,
             show_gui: true,
-            show_graphics_window: false,
-            show_controls_window: false,
             show_about_window: false,
             tile_fade_strength: 0.7,
             traces: false,
@@ -442,6 +504,7 @@ impl Application {
     /// - Particle position patterns
     /// - Interaction matrix generators
     /// - Particle type distributions
+    #[allow(clippy::type_complexity)]
     fn init_selection_managers() -> (
         SelectionManager<Box<dyn rendering::Palette>>,
         SelectionManager<Box<dyn physics::PositionSetter>>,
@@ -668,6 +731,7 @@ impl Application {
     /// - Mouse input
     /// - Window resizing
     /// - Touchpad input
+    /// 
     /// Returns true if the event was handled and should not be processed further
     fn handle_event(&mut self, event: &WindowEvent) -> bool {
         let response = self.egui_state.on_window_event(&self.window, event);
@@ -791,7 +855,6 @@ impl Application {
         match key_code {
             KeyCode::Escape => std::process::exit(0),
             KeyCode::Slash => self.show_gui = !self.show_gui,
-            KeyCode::KeyG => self.show_graphics_window = !self.show_graphics_window,
             KeyCode::KeyT => {
                 self.traces_user_enabled = !self.traces_user_enabled;
                 // Update actual traces state unless camera is moving
@@ -1137,8 +1200,6 @@ impl Application {
 
         // Split self to avoid borrow checker issues
         let show_gui = self.show_gui;
-        let show_graphics_window = &mut self.show_graphics_window;
-        let show_controls_window = &mut self.show_controls_window;
         let show_about_window = &mut self.show_about_window;
         let tile_fade_strength = &mut self.tile_fade_strength;
         let traces_user_enabled = &mut self.traces_user_enabled;
@@ -1146,11 +1207,11 @@ impl Application {
         let physics_loop_pause = &mut self.physics_loop.pause;
         let physics_snapshot = &self.physics_snapshot;
         let render_clock = &self.render_clock;
-        let _app_settings = &mut self.app_settings;
-        let _palettes = &mut self.palettes;
-        let _position_setters = &mut self.position_setters;
-        let _type_setters = &mut self.type_setters;
-        let _matrix_generators = &mut self.matrix_generators;
+        let app_settings = &mut self.app_settings;
+        let palettes = &mut self.palettes;
+        let position_setters = &mut self.position_setters;
+        let type_setters = &mut self.type_setters;
+        let matrix_generators = &mut self.matrix_generators;
         let local_matrix = &mut self.local_matrix;
         let physics = &mut self.physics;
         let physics_time_avg = self.physics_time_avg;
@@ -1169,8 +1230,6 @@ impl Application {
                 config_width,
                 config_height,
                 show_gui,
-                show_graphics_window,
-                show_controls_window,
                 show_about_window,
                 tile_fade_strength,
                 traces_user_enabled,
@@ -1178,11 +1237,11 @@ impl Application {
                 physics_loop_pause,
                 physics_snapshot,
                 render_clock,
-                _app_settings,
-                _palettes,
-                _position_setters,
-                _type_setters,
-                _matrix_generators,
+                app_settings,
+                palettes,
+                position_setters,
+                type_setters,
+                matrix_generators,
                 local_matrix,
                 physics,
                 physics_time_avg,
