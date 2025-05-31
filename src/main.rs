@@ -52,8 +52,7 @@ use physics::{
     ZeroMatrixGenerator,
 };
 use rendering::{
-    Camera, HexPalette, NaturalRainbowPalette, Palette, ParticleRenderer, SimpleRainbowPalette,
-    SunsetPalette,
+    Camera, HexPalette, Palette, ParticleRenderer,
 };
 use shaders::{FadeShader, ParticleShader, UniformData};
 use ui::{Clock, Loop, SelectionManager};
@@ -375,29 +374,26 @@ impl Application {
     }
 
     fn init_palettes() -> SelectionManager<Box<dyn rendering::Palette>> {
-        let mut palette_list = vec![
-            (
-                "Natural Rainbow".to_string(),
-                Box::new(NaturalRainbowPalette) as Box<dyn rendering::Palette>,
-            ),
-            (
-                "Simple Rainbow".to_string(),
-                Box::new(SimpleRainbowPalette) as Box<dyn rendering::Palette>,
-            ),
-            (
-                "Sunset".to_string(),
-                Box::new(SunsetPalette) as Box<dyn rendering::Palette>,
-            ),
-        ];
+        let mut palette_list = Vec::new();
 
+        // Load Endesga-8 palette first to make it default
+        if let Ok(hex_palette) = HexPalette::load_from_file("palettes/endesga-8.hex") {
+            let name = hex_palette.name().to_string();
+            palette_list.push((name, Box::new(hex_palette) as Box<dyn rendering::Palette>));
+        }
+
+        // Load other hex palettes
         if let Ok(entries) = std::fs::read_dir("palettes") {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().and_then(|s| s.to_str()) == Some("hex") {
+                    // Skip endesga-8.hex as we already loaded it
+                    if path.file_name().unwrap() == "endesga-8.hex" {
+                        continue;
+                    }
                     if let Ok(hex_palette) = HexPalette::load_from_file(path.to_str().unwrap()) {
                         let name = hex_palette.name().to_string();
-                        palette_list
-                            .push((name, Box::new(hex_palette) as Box<dyn rendering::Palette>));
+                        palette_list.push((name, Box::new(hex_palette) as Box<dyn rendering::Palette>));
                     }
                 }
             }

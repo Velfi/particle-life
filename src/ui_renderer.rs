@@ -290,32 +290,27 @@ pub fn render_matrix_editor(
                         for j in 0..matrix_size {
                             let value = local_matrix[i][j];
                             
-                            // Custom color scheme: yellow -> orange -> red -> purple -> blue -> dark blue
-                            let t = 1.0 - (value + 1.0) as f32 / 2.0; // Reverse: -1..1 to 1..0
+                            // New color scheme: blue (#a3b8ef) to black (#000000) to red (#e27d60)
                             let color = {
-                                // Color stops (as (r,g,b))
-                                let stops = [
-                                    (246, 255,  87),  // Yellow
-                                    (255, 177,  78),  // Orange
-                                    (255, 106,  78),  // Red
-                                    (139,  78, 155),  // Purple
-                                    ( 59,  59, 155),  // Blue
-                                    (  0,  43,  54),  // Dark Blue
-                                ];
-                                let n = stops.len() - 1;
-                                let scaled = t * n as f32;
-                                let idx = scaled.floor() as usize;
-                                let frac = scaled - idx as f32;
-                                let (r, g, b) = if idx < n {
-                                    let (r1, g1, b1) = stops[idx];
-                                    let (r2, g2, b2) = stops[idx + 1];
+                                let blue = (0xa3, 0xb8, 0xef);
+                                let black = (0x00, 0x00, 0x00);
+                                let red = (0xe2, 0x7d, 0x60);
+                                let (r, g, b) = if value < 0.0 {
+                                    // Interpolate blue to black
+                                    let t = (value + 1.0) as f32; // -1..0 => 0..1
                                     (
-                                        (r1 as f32 + (r2 as f32 - r1 as f32) * frac) as u8,
-                                        (g1 as f32 + (g2 as f32 - g1 as f32) * frac) as u8,
-                                        (b1 as f32 + (b2 as f32 - b1 as f32) * frac) as u8,
+                                        (blue.0 as f32 * (1.0 - t) + black.0 as f32 * t) as u8,
+                                        (blue.1 as f32 * (1.0 - t) + black.1 as f32 * t) as u8,
+                                        (blue.2 as f32 * (1.0 - t) + black.2 as f32 * t) as u8,
                                     )
                                 } else {
-                                    stops[n]
+                                    // Interpolate black to red
+                                    let t = value as f32; // 0..1
+                                    (
+                                        (black.0 as f32 * (1.0 - t) + red.0 as f32 * t) as u8,
+                                        (black.1 as f32 * (1.0 - t) + red.1 as f32 * t) as u8,
+                                        (black.2 as f32 * (1.0 - t) + red.2 as f32 * t) as u8,
+                                    )
                                 };
                                 egui::Color32::from_rgb(r, g, b)
                             };
