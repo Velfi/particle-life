@@ -1,6 +1,24 @@
+//! Shader system for the particle life simulator
+//! 
+//! This module manages the WebGPU shaders and rendering pipelines used for:
+//! - Particle rendering with instanced quads
+//! - Screen-space fade effects
+//! - Physics computation
+//! - Compositing and post-processing
+//! 
+//! The shader system uses WGSL (WebGPU Shading Language) for GPU-accelerated
+//! rendering and computation.
+
 use bytemuck::{Pod, Zeroable};
 use wgpu::{BindGroup, Buffer, Device, RenderPipeline, VertexAttribute, VertexBufferLayout};
 
+/// Vertex format for particle rendering
+/// 
+/// Each particle is rendered as a quad with:
+/// - position: 3D world position
+/// - color: RGBA color
+/// - size: Particle size in world units
+/// - quad_vertex: 2D position within the quad (-1 to 1)
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct ParticleVertex {
@@ -12,6 +30,7 @@ pub struct ParticleVertex {
 }
 
 impl ParticleVertex {
+    /// Vertex attributes for the particle shader
     const ATTRIBS: [VertexAttribute; 4] = wgpu::vertex_attr_array![
         0 => Float32x3,  // position
         1 => Float32x4,  // color
@@ -19,6 +38,7 @@ impl ParticleVertex {
         3 => Float32x2,  // quad_vertex
     ];
 
+    /// Returns the vertex buffer layout for particle rendering
     pub fn desc() -> VertexBufferLayout<'static> {
         VertexBufferLayout {
             array_stride: std::mem::size_of::<ParticleVertex>() as wgpu::BufferAddress,
@@ -28,6 +48,17 @@ impl ParticleVertex {
     }
 }
 
+/// Uniform data passed to the particle shader
+/// 
+/// Contains:
+/// - view_proj: View-projection matrix for camera
+/// - time: Current simulation time
+/// - particle_size: Base size of particles
+/// - cam_top_left: Camera position for wrapping
+/// - wrap: Whether to wrap particles around world
+/// - show_tiling: Whether to show world tiling
+/// - world_size: Size of the world
+/// - tile_fade_strength: Strength of tile fade effect
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct UniformData {
@@ -41,6 +72,12 @@ pub struct UniformData {
     pub tile_fade_strength: f32,
 }
 
+/// Manages the particle rendering pipeline
+/// 
+/// Handles:
+/// - Shader compilation and pipeline creation
+/// - Uniform buffer management
+/// - Bind group setup
 pub struct ParticleShader {
     pub render_pipeline: RenderPipeline,
     pub uniform_buffer: wgpu::Buffer,
@@ -48,6 +85,13 @@ pub struct ParticleShader {
 }
 
 impl ParticleShader {
+    /// Creates a new particle shader with the specified device and format
+    /// 
+    /// Sets up:
+    /// - WGSL shader compilation
+    /// - Uniform buffer creation
+    /// - Bind group layout and creation
+    /// - Render pipeline configuration
     pub fn new(device: &Device, format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Particle Shader"),
@@ -144,6 +188,11 @@ impl ParticleShader {
         }
     }
 
+    /// Updates the uniform buffer with new data
+    /// 
+    /// Parameters:
+    /// - queue: The WebGPU queue for buffer updates
+    /// - uniform_data: New uniform data to upload
     pub fn update_uniforms(&self, queue: &wgpu::Queue, uniform_data: &UniformData) {
         queue.write_buffer(
             &self.uniform_buffer,
@@ -153,6 +202,14 @@ impl ParticleShader {
     }
 }
 
+/// Converts HSV color to RGB
+/// 
+/// Parameters:
+/// - h: Hue (0-360)
+/// - s: Saturation (0-1)
+/// - v: Value (0-1)
+/// 
+/// Returns RGB color as [r, g, b] with values in range 0-1
 pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [f32; 3] {
     let c = v * s;
     let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
@@ -175,12 +232,22 @@ pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [f32; 3] {
     [r + m, g + m, b + m]
 }
 
+/// Manages the screen fade effect shader
+/// 
+/// Handles:
+/// - Fade shader compilation
+/// - Uniform buffer for fade factor
+/// - Render pipeline for full-screen quad
 pub struct FadeShader {
     pipeline: RenderPipeline,
     bind_group: BindGroup,
     uniform_buffer: Buffer,
 }
 
+/// Uniform data for the fade shader
+/// 
+/// Contains:
+/// - fade_factor: Strength of the fade effect (0-1)
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct FadeUniformData {
@@ -189,6 +256,13 @@ struct FadeUniformData {
 }
 
 impl FadeShader {
+    /// Creates a new fade shader with the specified device and format
+    /// 
+    /// Sets up:
+    /// - WGSL shader compilation
+    /// - Uniform buffer creation
+    /// - Bind group layout and creation
+    /// - Render pipeline for full-screen quad
     pub fn new(device: &Device, format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Fade Shader"),
@@ -276,6 +350,11 @@ impl FadeShader {
         }
     }
 
+    /// Updates the fade factor uniform
+    /// 
+    /// Parameters:
+    /// - queue: The WebGPU queue for buffer updates
+    /// - fade_factor: New fade factor (0-1)
     pub fn update_uniforms(&self, queue: &wgpu::Queue, fade_factor: f32) {
         let uniform_data = FadeUniformData {
             fade_factor,
@@ -288,6 +367,10 @@ impl FadeShader {
         );
     }
 
+    /// Renders the fade effect
+    /// 
+    /// Parameters:
+    /// - render_pass: The WebGPU render pass to record commands
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, &self.bind_group, &[]);

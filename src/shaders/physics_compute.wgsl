@@ -1,34 +1,68 @@
 // Physics compute shader for particle life simulation
+//
+// This shader implements the core physics simulation on the GPU:
+// - Spatial partitioning for efficient neighbor finding
+// - Force calculations between particles
+// - Position and velocity updates
+// - World boundary handling
+// - Cursor interaction forces
+//
+// The simulation uses a grid-based spatial partitioning system to efficiently
+// find nearby particles and calculate forces between them.
 
+/// Particle data structure
 struct Particle {
+    /// World position (x, y, z)
     position: vec3<f32>,
+    /// Velocity vector (vx, vy, vz)
     velocity: vec3<f32>,
+    /// Type ID for interaction rules
     type_id: u32,
+    /// Padding for alignment
     _padding: u32,
 }
 
+/// Physics simulation settings
 struct PhysicsSettings {
+    /// Time step for simulation
     dt: f32,
+    /// Maximum interaction radius
     rmax: f32,
+    /// Velocity damping factor
     friction: f32,
+    /// Force strength multiplier
     force_multiplier: f32,
+    /// Size of the world
     world_size: f32,
+    /// Whether to wrap particles around world (1) or not (0)
     wrap_boundaries: u32,
+    /// Size of the interaction matrix
     matrix_size: u32,
+    /// Whether cursor interaction is active (1) or not (0)
     cursor_active: u32,
+    /// Cursor position in world space
     cursor_position: vec3<f32>,
+    /// Radius of cursor influence
     cursor_size: f32,
+    /// Strength of cursor force
     cursor_strength: f32,
+    /// Padding for alignment
     _padding: vec3<f32>,
 }
 
+/// Parameters for spatial grid
 struct SpatialGridParams {
+    /// Size of each grid cell
     cell_size: f32,
+    /// Number of cells in each dimension
     grid_size: u32,
+    /// Minimum world coordinate
     world_min: f32,
+    /// Padding for alignment
     _padding: f32,
 }
 
+// Storage buffers and uniforms
 @group(0) @binding(0) var<storage, read_write> particles: array<Particle>;
 @group(0) @binding(1) var<storage, read_write> forces: array<vec3<f32>>;
 @group(0) @binding(2) var<uniform> settings: PhysicsSettings;
@@ -37,9 +71,17 @@ struct SpatialGridParams {
 @group(0) @binding(5) var<storage, read_write> grid_counts: array<atomic<u32>>;
 @group(0) @binding(6) var<uniform> grid_params: SpatialGridParams;
 
+/// Size of each compute workgroup
 const WORKGROUP_SIZE: u32 = 64u;
+/// Maximum number of particles per grid cell
 const MAX_PARTICLES_PER_CELL: u32 = 64u;
 
+/// Calculates the grid cell index for a given position
+/// 
+/// Parameters:
+/// - pos: World position to find cell for
+/// 
+/// Returns the index of the cell containing the position
 fn get_cell_index(pos: vec3<f32>) -> u32 {
     let shifted_x = pos.x - grid_params.world_min;
     let shifted_y = pos.y - grid_params.world_min;
@@ -50,6 +92,12 @@ fn get_cell_index(pos: vec3<f32>) -> u32 {
     return gy * grid_params.grid_size + gx;
 }
 
+/// Calculates the shortest distance between two positions, accounting for wrapping
+/// 
+/// Parameters:
+/// - delta: Vector between two positions
+/// 
+/// Returns the wrapped distance vector
 fn wrap_distance(delta: vec3<f32>) -> vec3<f32> {
     var result = delta;
     let half_world = settings.world_size * 0.5;
@@ -71,7 +119,9 @@ fn wrap_distance(delta: vec3<f32>) -> vec3<f32> {
     return result;
 }
 
-// Clear spatial grid
+/// Clears the spatial grid for the next frame
+/// 
+/// Resets particle counts and invalidates all grid entries
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn clear_grid(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let index = global_id.x;
@@ -90,7 +140,9 @@ fn clear_grid(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 }
 
-// Build spatial grid
+/// Builds the spatial grid by assigning particles to cells
+/// 
+/// Each particle is assigned to the cell containing its position
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn build_grid(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let particle_idx = global_id.x;
@@ -112,7 +164,12 @@ fn build_grid(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 }
 
-// Calculate forces
+/// Calculates forces between particles using the spatial grid
+/// 
+/// For each particle:
+/// 1. Find nearby particles using the grid
+/// 2. Calculate forces based on distance and interaction matrix
+/// 3. Add cursor forces if active
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn calculate_forces(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let particle_idx = global_id.x;
@@ -126,7 +183,7 @@ fn calculate_forces(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var total_force = vec3<f32>(0.0);
     
     let rmax_sq = settings.rmax * settings.rmax;
-    let beta = 0.3;
+    let beta = 0.3; // Force curve parameter
     
     // Get nearby particles from spatial grid
     let particle_cell = get_cell_index(particle_i.position);
@@ -173,8 +230,10 @@ fn calculate_forces(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     
                     var force_magnitude: f32;
                     if (distance < beta * settings.rmax) {
+                        // Repulsive force at close range
                         force_magnitude = (distance / (beta * settings.rmax) - 1.0) * settings.force_multiplier;
                     } else {
+                        // Attractive/repulsive force based on interaction matrix
                         force_magnitude = attraction * (1.0 - abs(1.0 + beta - 2.0 * distance / settings.rmax) / (1.0 - beta)) * settings.force_multiplier;
                     }
                     
@@ -202,7 +261,13 @@ fn calculate_forces(@builtin(global_invocation_id) global_id: vec3<u32>) {
     forces[particle_idx] = total_force;
 }
 
-// Update positions and velocities
+/// Updates particle positions and velocities
+/// 
+/// For each particle:
+/// 1. Apply forces to velocity
+/// 2. Apply friction
+/// 3. Update position
+/// 4. Handle world boundaries
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn update_particles(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let particle_idx = global_id.x;

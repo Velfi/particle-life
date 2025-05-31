@@ -1,10 +1,26 @@
-mod app_settings;
-mod physics;
-mod rendering;
-mod shaders;
-mod ui;
-mod ui_renderer;
+//! Particle Life Simulator
+//! 
+//! A GPU-accelerated particle simulation that demonstrates emergent behavior through
+//! simple interaction rules. The simulation uses WebGPU for rendering and physics
+//! computation, with an immediate mode GUI for user interaction.
+//! 
+//! Key features:
+//! - GPU-accelerated particle rendering and physics
+//! - Multiple particle types with configurable interaction rules
+//! - Various initial position patterns and type distributions
+//! - Interactive camera controls and particle manipulation
+//! - Configurable color palettes and visual effects
+//! - Real-time performance monitoring
 
+// Module declarations for the particle life simulator
+mod app_settings;  // Application configuration and settings management
+mod physics;       // Physics simulation and particle behavior
+mod rendering;     // Graphics rendering and visual display
+mod shaders;       // GPU shader programs for rendering
+mod ui;           // User interface components and utilities
+mod ui_renderer;  // UI rendering and layout management
+
+// External crates and standard library imports
 use egui_winit::State;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -57,92 +73,112 @@ use rendering::{
 use shaders::{FadeShader, ParticleShader, UniformData};
 use ui::{Clock, Loop, SelectionManager};
 
+/// Main application structure that manages the entire particle life simulation
+/// Handles graphics rendering, physics simulation, UI, and user input
+/// 
+/// The Application struct is the core of the simulator, coordinating between:
+/// - GPU rendering and shader management
+/// - Physics simulation and particle state
+/// - User interface and input handling
+/// - Camera and view management
+/// - Configuration and settings
 struct Application {
-    // Core components
-    window: Arc<winit::window::Window>,
-    surface: Arc<Surface<'static>>,
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
-    config: SurfaceConfiguration,
+    // Core GPU and windowing components
+    window: Arc<winit::window::Window>,        // Main application window
+    surface: Arc<Surface<'static>>,            // GPU surface for rendering
+    device: Arc<wgpu::Device>,                 // GPU device handle
+    queue: Arc<wgpu::Queue>,                   // GPU command queue
+    config: SurfaceConfiguration,              // Surface configuration settings
 
-    // Rendering
-    particle_renderer: ParticleRenderer,
-    particle_shader: ParticleShader,
-    fade_shader: FadeShader,
-    camera: Camera,
-    world_texture: wgpu::Texture,
-    world_texture_view: wgpu::TextureView,
-    world_texture_id: egui::TextureId,
+    // Rendering system components
+    particle_renderer: ParticleRenderer,       // Handles particle mesh generation and rendering
+    particle_shader: ParticleShader,           // GPU shader for particle rendering
+    fade_shader: FadeShader,                   // GPU shader for trail fade effects
+    camera: Camera,                            // 2D camera for world view
+    world_texture: wgpu::Texture,              // Offscreen texture for particle rendering
+    world_texture_view: wgpu::TextureView,     // View into the world texture
+    world_texture_id: egui::TextureId,         // Texture ID for UI display
 
-    // Physics
-    physics: ExtendedPhysics,
-    physics_snapshot: PhysicsSnapshot,
-    physics_loop: Loop,
-    new_snapshot_available: Arc<Mutex<bool>>,
+    // Physics simulation components
+    physics: ExtendedPhysics,                  // Main physics engine and particle state
+    physics_snapshot: PhysicsSnapshot,         // Immutable snapshot of physics state for rendering
+    physics_loop: Loop,                        // Physics loop timing and control
+    new_snapshot_available: Arc<Mutex<bool>>,  // Thread-safe flag for physics updates
 
-    // UI
-    egui_ctx: egui::Context,
-    egui_state: State,
-    egui_renderer: egui_wgpu::Renderer,
+    // UI system components
+    egui_ctx: egui::Context,                   // Main UI context for immediate mode GUI
+    egui_state: State,                         // UI input/event state management
+    egui_renderer: egui_wgpu::Renderer,       // GPU-based UI renderer
 
-    // UI state
-    show_gui: bool,
-    show_graphics_window: bool,
-    show_controls_window: bool,
-    show_about_window: bool,
-    tile_fade_strength: f32,
-    traces: bool,
-    trace_fade: f32,
-    traces_user_enabled: bool, // User's actual traces setting
-    camera_is_moving: bool,    // Whether camera is currently being moved
-    camera_movement_timer: std::time::Instant, // Timer to detect when movement stops
+    // UI state and visibility flags
+    show_gui: bool,                            // Master GUI visibility toggle
+    show_graphics_window: bool,                // Graphics settings window visibility
+    show_controls_window: bool,                // Controls help window visibility
+    show_about_window: bool,                   // About dialog visibility
+    tile_fade_strength: f32,                   // Strength of tile boundary fade effect
+    traces: bool,                              // Current trail rendering state
+    trace_fade: f32,                           // Trail fade factor (0.0-1.0)
+    traces_user_enabled: bool,                 // User's desired trail setting
+    camera_is_moving: bool,                    // Whether camera is currently in motion
+    camera_movement_timer: std::time::Instant, // Timer to detect when camera movement stops
     prev_camera_position: nalgebra::Vector3<f64>, // Previous camera position for movement detection
-    prev_camera_size: f64,     // Previous camera size for zoom detection
+    prev_camera_size: f64,                     // Previous camera size for zoom detection
 
-    // Matrix editing state
-    local_matrix: Vec<Vec<f64>>,
+    // Physics configuration state
+    local_matrix: Vec<Vec<f64>>,               // Local copy of interaction matrix for UI editing
 
-    // Selection managers
-    palettes: SelectionManager<Box<dyn rendering::Palette>>,
-    position_setters: SelectionManager<Box<dyn physics::PositionSetter>>,
-    matrix_generators: SelectionManager<Box<dyn physics::MatrixGenerator>>,
-    type_setters: SelectionManager<Box<dyn physics::TypeSetter>>,
+    // Configuration option managers
+    palettes: SelectionManager<Box<dyn rendering::Palette>>,           // Available color palettes
+    position_setters: SelectionManager<Box<dyn physics::PositionSetter>>, // Particle initial position patterns
+    matrix_generators: SelectionManager<Box<dyn physics::MatrixGenerator>>, // Interaction matrix generators
+    type_setters: SelectionManager<Box<dyn physics::TypeSetter>>,      // Particle type assignment methods
 
-    // Timing
-    render_clock: Clock,
+    // Performance and timing
+    render_clock: Clock,                       // Render loop timing control
 
-    // Input state
-    mouse_x: f64,
-    mouse_y: f64,
-    pmouse_x: f64,
-    pmouse_y: f64,
+    // Mouse input state
+    mouse_x: f64,                              // Current mouse X position
+    mouse_y: f64,                              // Current mouse Y position
+    pmouse_x: f64,                             // Previous mouse X position
+    pmouse_y: f64,                             // Previous mouse Y position
 
-    // Key states
-    keys_pressed: std::collections::HashSet<KeyCode>,
-    left_mouse_pressed: bool,
-    right_mouse_pressed: bool,
-    middle_mouse_pressed: bool,
+    // Input state tracking
+    keys_pressed: std::collections::HashSet<KeyCode>, // Currently pressed keyboard keys
+    left_mouse_pressed: bool,                  // Left mouse button state
+    right_mouse_pressed: bool,                 // Right mouse button state
+    middle_mouse_pressed: bool,                // Middle mouse button state
 
-    // Mouse state tracking
-    cursor_moved_last_frame: bool,
+    // Frame-based input tracking
+    cursor_moved_last_frame: bool,             // Whether cursor moved in the last frame
 
-    // App settings
-    app_settings: AppSettings,
+    // Persistent application settings
+    app_settings: AppSettings,                 // User preferences and configuration
 
-    // Performance tracking
-    physics_time_avg: f64,
-    physics_time_samples: Vec<f64>,
+    // Performance monitoring
+    physics_time_avg: f64,                     // Rolling average of physics computation time
+    physics_time_samples: Vec<f64>,            // Recent physics timing samples for averaging
 
-    // Debug timing
-    last_debug_time: std::time::Instant,
+    // Debug and diagnostics
+    last_debug_time: std::time::Instant,       // Timer for periodic debug output
 
-    // Mouse interaction
-    cursor_world_position: nalgebra::Vector3<f64>,
-    cursor_size: f64,
-    cursor_strength: f64,
+    // Mouse-world interaction system
+    cursor_world_position: nalgebra::Vector3<f64>, // Cursor position in world coordinates
+    cursor_size: f64,                          // Radius of cursor influence area
+    cursor_strength: f64,                      // Force strength applied by cursor interaction
 }
 
 impl Application {
+    /// Create a new Application instance with initialized graphics, physics, and UI systems
+    /// 
+    /// This function performs the following initialization steps:
+    /// 1. Creates the main window
+    /// 2. Initializes the WebGPU graphics system
+    /// 3. Sets up the immediate mode GUI
+    /// 4. Initializes the rendering system
+    /// 5. Creates the offscreen world texture
+    /// 6. Initializes the physics simulation
+    /// 7. Sets up configuration managers
+    /// 8. Loads application settings
     async fn new(event_loop: &EventLoop<()>) -> Self {
         let window = Self::create_window(event_loop);
         let (device, queue, surface, config) = Self::init_wgpu(&window).await;
@@ -215,6 +251,12 @@ impl Application {
         }
     }
 
+    /// Create the main application window with default settings
+    /// 
+    /// Sets up a window with:
+    /// - Title: "Particle Life Simulator"
+    /// - Initial size: 1200x800 logical pixels
+    /// - Default window settings
     fn create_window(event_loop: &EventLoop<()>) -> Arc<winit::window::Window> {
         Arc::new(
             WindowBuilder::new()
@@ -225,6 +267,14 @@ impl Application {
         )
     }
 
+    /// Initialize the WebGPU graphics system including device, queue, and surface
+    /// 
+    /// This function:
+    /// 1. Creates a new WebGPU instance
+    /// 2. Creates a surface for rendering
+    /// 3. Selects an appropriate GPU adapter
+    /// 4. Creates the device and command queue
+    /// 5. Configures the surface for rendering
     async fn init_wgpu(
         window: &Arc<winit::window::Window>,
     ) -> (
@@ -293,6 +343,12 @@ impl Application {
         (device, queue, surface, config)
     }
 
+    /// Initialize the immediate mode GUI system
+    /// 
+    /// Sets up:
+    /// - egui context for UI rendering
+    /// - Input state management
+    /// - GPU-based UI renderer
     fn init_egui(
         window: &Arc<winit::window::Window>,
         device: &Arc<wgpu::Device>,
@@ -304,6 +360,13 @@ impl Application {
         (egui_ctx, egui_state, egui_renderer)
     }
 
+    /// Initialize the particle rendering system
+    /// 
+    /// Creates:
+    /// - Particle renderer for GPU-accelerated rendering
+    /// - Particle shader for rendering particles
+    /// - Fade shader for trail effects
+    /// - Camera for view management
     fn init_rendering(
         device: &Arc<wgpu::Device>,
         surface_format: wgpu::TextureFormat,
@@ -315,6 +378,12 @@ impl Application {
         (particle_renderer, particle_shader, fade_shader, camera)
     }
 
+    /// Create the offscreen texture for rendering the particle world
+    /// 
+    /// This texture is used to:
+    /// 1. Render particles offscreen
+    /// 2. Apply post-processing effects
+    /// 3. Display the result in the UI
     fn create_world_texture(
         device: &Arc<wgpu::Device>,
         config: &SurfaceConfiguration,
@@ -343,6 +412,13 @@ impl Application {
         (world_texture, world_texture_view, world_texture_id)
     }
 
+    /// Initialize the physics simulation system
+    /// 
+    /// Creates:
+    /// - Physics engine with default settings
+    /// - Snapshot system for thread-safe state access
+    /// - Physics loop for timing control
+    /// - Thread-safe flag for update synchronization
     fn init_physics() -> (ExtendedPhysics, PhysicsSnapshot, Loop, Arc<Mutex<bool>>) {
         let physics = ExtendedPhysics::new(
             Box::new(DefaultPositionSetter),
@@ -359,7 +435,13 @@ impl Application {
         )
     }
 
-    #[allow(clippy::type_complexity)]
+    /// Initialize all configuration option managers
+    /// 
+    /// Sets up managers for:
+    /// - Color palettes
+    /// - Particle position patterns
+    /// - Interaction matrix generators
+    /// - Particle type distributions
     fn init_selection_managers() -> (
         SelectionManager<Box<dyn rendering::Palette>>,
         SelectionManager<Box<dyn physics::PositionSetter>>,
@@ -373,6 +455,7 @@ impl Application {
         (palettes, position_setters, matrix_generators, type_setters)
     }
 
+    /// Load color palettes from hex files in the palettes directory
     fn init_palettes() -> SelectionManager<Box<dyn rendering::Palette>> {
         let mut palette_list = Vec::new();
 
@@ -402,6 +485,7 @@ impl Application {
         SelectionManager::new(palette_list)
     }
 
+    /// Initialize available particle position setting patterns
     fn init_position_setters() -> SelectionManager<Box<dyn physics::PositionSetter>> {
         SelectionManager::new(vec![
             (
@@ -451,6 +535,7 @@ impl Application {
         ])
     }
 
+    /// Initialize available interaction matrix generation algorithms
     fn init_matrix_generators() -> SelectionManager<Box<dyn physics::MatrixGenerator>> {
         SelectionManager::new(vec![
             (
@@ -484,6 +569,7 @@ impl Application {
         ])
     }
 
+    /// Initialize available particle type assignment methods
     fn init_type_setters() -> SelectionManager<Box<dyn physics::TypeSetter>> {
         SelectionManager::new(vec![
             (
@@ -521,6 +607,15 @@ impl Application {
         ])
     }
 
+    /// Set up the initial simulation state
+    /// 
+    /// This function:
+    /// 1. Initializes particle count and types
+    /// 2. Sets initial particle positions
+    /// 3. Generates the interaction matrix
+    /// 4. Takes the initial physics snapshot
+    /// 5. Initializes the local matrix copy for UI
+    /// 6. Buffers initial particle data
     fn setup(&mut self) {
         // Initialize physics with some default particles
         self.physics.set_particle_count(20_000);
@@ -566,6 +661,14 @@ impl Application {
         );
     }
 
+    /// Process window events including keyboard, mouse, and resize events
+    /// 
+    /// Handles:
+    /// - Keyboard input
+    /// - Mouse input
+    /// - Window resizing
+    /// - Touchpad input
+    /// Returns true if the event was handled and should not be processed further
     fn handle_event(&mut self, event: &WindowEvent) -> bool {
         let response = self.egui_state.on_window_event(&self.window, event);
         if response.consumed {
@@ -677,9 +780,17 @@ impl Application {
         }
     }
 
+    /// Handle keyboard key press events
+    /// 
+    /// Implements keyboard shortcuts for:
+    /// - GUI toggles
+    /// - Physics control
+    /// - Camera reset
+    /// - Particle manipulation
     fn handle_key_pressed(&mut self, key_code: KeyCode) {
         match key_code {
-            KeyCode::Escape => self.show_gui = !self.show_gui,
+            KeyCode::Escape => std::process::exit(0),
+            KeyCode::Slash => self.show_gui = !self.show_gui,
             KeyCode::KeyG => self.show_graphics_window = !self.show_graphics_window,
             KeyCode::KeyT => {
                 self.traces_user_enabled = !self.traces_user_enabled;
@@ -722,6 +833,12 @@ impl Application {
         }
     }
 
+    /// Handle mouse scroll wheel events
+    /// 
+    /// Implements:
+    /// - Camera zooming
+    /// - Parameter adjustment with modifier keys
+    /// - DPI-aware zooming
     fn handle_scroll(&mut self, delta_y: f64) {
         let ctrl_pressed = self.keys_pressed.contains(&KeyCode::ControlLeft)
             || self.keys_pressed.contains(&KeyCode::ControlRight);
@@ -754,6 +871,12 @@ impl Application {
         }
     }
 
+    /// Convert screen mouse coordinates to world coordinates
+    /// 
+    /// This function:
+    /// 1. Accounts for DPI scaling
+    /// 2. Converts to normalized device coordinates
+    /// 3. Applies camera transformation
     fn update_cursor_world_position(&mut self) {
         // Convert screen coordinates to world coordinates
         let scale_factor = self.window.scale_factor();
@@ -775,6 +898,14 @@ impl Application {
         self.cursor_world_position.z = 0.0;
     }
 
+    /// Update the entire simulation state
+    /// 
+    /// This function:
+    /// 1. Updates camera position and zoom
+    /// 2. Handles camera movement detection
+    /// 3. Updates physics simulation
+    /// 4. Tracks performance metrics
+    /// 5. Updates particle renderer
     fn update(&mut self, dt: f64) {
         self.render_clock.tick();
 
@@ -922,6 +1053,15 @@ impl Application {
         );
     }
 
+    /// Render one frame of the simulation
+    /// 
+    /// This function:
+    /// 1. Renders particles to offscreen texture
+    /// 2. Applies post-processing effects
+    /// 3. Renders the UI
+    /// 4. Presents the final frame
+    /// 
+    /// Returns a Result indicating success or failure of the render operation
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
@@ -1116,6 +1256,13 @@ impl Application {
     }
 }
 
+/// Main entry point for the application
+/// 
+/// This function:
+/// 1. Initializes logging
+/// 2. Creates the event loop
+/// 3. Creates and sets up the application
+/// 4. Runs the main event loop
 #[tokio::main]
 async fn main() {
     env_logger::init();

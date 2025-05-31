@@ -1,8 +1,47 @@
+//! UI renderer for the particle life simulator
+//! 
+//! This module handles all UI rendering using egui, including:
+//! - Main menu bar
+//! - Physics control panel
+//! - Matrix editor
+//! - Particle setup controls
+//! - Graphics settings
+//! - Mouse interaction settings
+//! - Type distribution visualization
+//! 
+//! The UI is designed to be intuitive and responsive, providing real-time
+//! control over the simulation parameters and visualization.
+
 use crate::app_settings::AppSettings;
 use crate::physics::{ExtendedPhysics, PhysicsSnapshot};
 use crate::rendering;
 use crate::ui::{Clock, SelectionManager};
 
+/// Renders the main UI overlay
+/// 
+/// Parameters:
+/// - ctx: egui context for rendering
+/// - world_texture_id: Texture ID for the simulation view
+/// - config_width/height: Window dimensions
+/// - show_gui: Whether to show the UI
+/// - show_*_window: Window visibility flags
+/// - tile_fade_strength: Strength of tile fade effect
+/// - traces_user_enabled: Whether motion trails are enabled
+/// - camera_is_moving: Whether camera is currently moving
+/// - physics_loop_pause: Whether simulation is paused
+/// - physics_snapshot: Current physics state
+/// - render_clock: Frame timing information
+/// - app_settings: Application settings
+/// - palettes: Color palette selection
+/// - position_setters: Particle position pattern selection
+/// - type_setters: Particle type distribution selection
+/// - matrix_generators: Interaction matrix pattern selection
+/// - local_matrix: Current interaction matrix
+/// - physics: Physics simulation state
+/// - physics_time_avg: Average physics update time
+/// - trace_fade: Motion trail fade strength
+/// - cursor_size: Mouse interaction radius
+/// - cursor_strength: Mouse interaction force
 #[allow(clippy::too_many_arguments)]
 pub fn render_ui(
     ctx: &egui::Context,
@@ -69,22 +108,17 @@ pub fn render_ui(
         camera_is_moving,
         cursor_size,
         cursor_strength,
-    );
-    render_graphics_window(
-        ctx,
-        show_graphics_window,
-        render_clock,
-        traces_user_enabled,
-        camera_is_moving,
         tile_fade_strength,
         trace_fade,
-        _app_settings,
-        _palettes,
     );
-    render_controls_window(ctx, show_controls_window);
     render_about_window(ctx, show_about_window);
 }
 
+/// Renders the top menu bar
+/// 
+/// Contains:
+/// - Menu dropdown with Controls and About
+/// - View dropdown with Graphics Settings and Hide GUI
 pub fn render_menu_bar(
     ctx: &egui::Context,
     show_controls_window: &mut bool,
@@ -94,25 +128,32 @@ pub fn render_menu_bar(
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
         egui::menu::bar(ui, |ui| {
             ui.menu_button("Menu", |ui| {
-                if ui.button("Controls").clicked() {
-                    *show_controls_window = true;
-                }
                 if ui.button("About").clicked() {
                     *show_about_window = true;
                 }
-            });
-            ui.menu_button("View", |ui| {
-                if ui.button("Graphics Settings").clicked() {
-                    *show_graphics_window = true;
+                ui.separator();
+                if ui.button("Toggle GUI [/]").clicked() {
+                    // We can't modify show_gui from here, it's handled by the key binding
                 }
-                if ui.button("Hide GUI [ESC]").clicked() {
-                    // Can't modify show_gui from here
+                if ui.button("Exit [ESC]").clicked() {
+                    std::process::exit(0);
                 }
             });
         });
     });
 }
 
+/// Renders the main physics control panel
+/// 
+/// Contains:
+/// - Simulation status and controls
+/// - Physics parameters
+/// - Matrix editor
+/// - Particle setup
+/// - Rendering settings
+/// - Mouse interaction
+/// - Type distribution
+/// - Quick controls
 #[allow(clippy::too_many_arguments)]
 pub fn render_physics_panel(
     ctx: &egui::Context,
@@ -131,6 +172,8 @@ pub fn render_physics_panel(
     camera_is_moving: bool,
     cursor_size: &mut f64,
     cursor_strength: &mut f64,
+    tile_fade_strength: &mut f32,
+    trace_fade: &mut f32,
 ) {
     egui::SidePanel::left("physics_panel")
         .min_width(320.0)
@@ -164,14 +207,37 @@ pub fn render_physics_panel(
 
                 ui.separator();
 
-                // Physics parameters
-                ui.label("Physics Parameters");
-                ui.label(format!("Particles: {}", physics_snapshot.particle_count));
-                ui.label(format!(
-                    "Matrix Size: {}x{}",
-                    physics_snapshot.type_count.len(),
-                    physics_snapshot.type_count.len()
-                ));
+                // Controls section
+                ui.collapsing("🎮 Controls", |ui| {
+                    ui.label("Simulation:");
+                    ui.label("  [SPACE] - Play/Pause simulation");
+                    ui.label("  [P] - Reset particle positions");
+                    ui.label("  [C] - Reset particle types");
+                    ui.label("  [M] - Generate new random matrix");
+                    ui.label("  [B] - Toggle boundaries (wrap/clamp)");
+
+                    ui.separator();
+
+                    ui.label("Display:");
+                    ui.label("  [ESC] - Exit application");
+                    ui.label("  [/] - Toggle GUI");
+                    ui.label("  [T] - Toggle particle traces");
+                    ui.label("  [G] - Show graphics settings");
+
+                    ui.separator();
+
+                    ui.label("Camera:");
+                    ui.label("  • Mouse wheel - Zoom in/out");
+                    ui.label("  • [WASD] or Arrow Keys - Pan camera");
+                    ui.label("  • [Z] - Reset zoom");
+                    ui.label("  • [Shift+Z] - Fit to window");
+
+                    ui.separator();
+
+                    ui.label("Mouse:");
+                    ui.label("  • Left Click - Repel particles");
+                    ui.label("  • Right Click - Attract particles");
+                });
 
                 ui.separator();
 
@@ -196,6 +262,9 @@ pub fn render_physics_panel(
                     _palettes,
                     traces_user_enabled,
                     camera_is_moving,
+                    tile_fade_strength,
+                    trace_fade,
+                    render_clock,
                 );
 
                 ui.separator();
@@ -209,14 +278,18 @@ pub fn render_physics_panel(
                 ui.separator();
 
                 render_type_distribution(ui, physics_snapshot, physics, _palettes);
-
-                ui.separator();
-
-                render_quick_controls(ui);
             });
         });
 }
 
+/// Renders the interaction matrix editor
+/// 
+/// Features:
+/// - Visual grid of interaction strengths
+/// - Color-coded cells based on interaction type
+/// - Click to edit individual interactions
+/// - Matrix size controls
+/// - Pattern generators
 pub fn render_matrix_editor(
     ui: &mut egui::Ui,
     physics_snapshot: &PhysicsSnapshot,
@@ -421,6 +494,13 @@ pub fn render_matrix_editor(
     });
 }
 
+/// Renders the particle setup controls
+/// 
+/// Features:
+/// - Particle count adjustment
+/// - Type count per particle type
+/// - Position pattern selection
+/// - Type distribution selection
 pub fn render_particle_setup(
     ui: &mut egui::Ui,
     physics: &mut ExtendedPhysics,
@@ -490,16 +570,53 @@ pub fn render_particle_setup(
     });
 }
 
+/// Renders the about window
+/// 
+/// Shows:
+/// - Application information
+/// - Version
+/// - Credits
+pub fn render_about_window(ctx: &egui::Context, show_about_window: &mut bool) {
+    if *show_about_window {
+        egui::Window::new("About")
+            .open(show_about_window)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.heading("🦀 Particle Life Simulator");
+                ui.separator();
+
+                ui.label("A high-performance particle simulation");
+                ui.label("converted from Java to Rust");
+
+                ui.separator();
+
+                ui.label("🔧 Technology Stack:");
+                ui.label("  • Rust programming language");
+                ui.label("  • egui for immediate mode GUI");
+                ui.label("  • wgpu for GPU-accelerated rendering");
+                ui.label("  • nalgebra for vector mathematics");
+
+                ui.separator();
+
+                ui.label("Originally inspired by the Java Particle Life project");
+                ui.label("Converted with Claude Code");
+            });
+    }
+}
+
 pub fn render_rendering_settings(
     ui: &mut egui::Ui,
     _app_settings: &mut AppSettings,
     _palettes: &mut SelectionManager<Box<dyn rendering::Palette>>,
     traces_user_enabled: &mut bool,
     camera_is_moving: bool,
+    tile_fade_strength: &mut f32,
+    trace_fade: &mut f32,
+    render_clock: &Clock,
 ) {
     ui.heading("Rendering Settings");
     
-    // Particle size control in main panel
+    // Particle size control
     ui.horizontal(|ui| {
         ui.label("Particle Size:");
         if ui.add(egui::Slider::new(&mut _app_settings.particle_size, 0.1..=1.0).step_by(0.01)).changed() {
@@ -507,7 +624,7 @@ pub fn render_rendering_settings(
         }
     });
     
-    // Palette selection in main panel
+    // Palette selection
     ui.horizontal(|ui| {
         ui.label("Color Palette:");
         let current_name = _palettes.get_active_name().to_string();
@@ -529,7 +646,7 @@ pub fn render_rendering_settings(
         }
     });
     
-    // Traces toggle
+    // Traces settings
     ui.horizontal(|ui| {
         ui.label("Particle Traces:");
         if ui.checkbox(traces_user_enabled, "Enable [T]").changed() {
@@ -542,6 +659,19 @@ pub fn render_rendering_settings(
         if camera_is_moving && *traces_user_enabled {
             ui.label("(disabled during panning)");
         }
+    });
+
+    if *traces_user_enabled {
+        ui.horizontal(|ui| {
+            ui.label("Trace Fade:");
+            ui.add(egui::Slider::new(trace_fade, 0.0..=1.0).step_by(0.01));
+        });
+    }
+
+    // Edge fade settings
+    ui.horizontal(|ui| {
+        ui.label("Edge Fade:");
+        ui.add(egui::Slider::new(tile_fade_strength, 0.0..=1.0).step_by(0.05));
     });
 }
 
@@ -669,122 +799,4 @@ pub fn render_quick_controls(ui: &mut egui::Ui) {
     ui.label("[B] - Toggle boundaries");
     ui.label("[T] - Toggle traces");
     ui.label("[ESC] - Toggle GUI");
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn render_graphics_window(
-    ctx: &egui::Context,
-    show_graphics_window: &mut bool,
-    render_clock: &Clock,
-    traces_user_enabled: &mut bool,
-    camera_is_moving: bool,
-    tile_fade_strength: &mut f32,
-    trace_fade: &mut f32,
-    _app_settings: &mut AppSettings,
-    _palettes: &mut SelectionManager<Box<dyn rendering::Palette>>,
-) {
-    if *show_graphics_window {
-        egui::Window::new("Graphics")
-            .open(show_graphics_window)
-            .show(ctx, |ui| {
-                ui.label(format!(
-                    "Graphics FPS: {:.0}",
-                    render_clock.get_avg_framerate()
-                ));
-                ui.separator();
-
-                ui.checkbox(traces_user_enabled, "Traces [T]");
-                if camera_is_moving && *traces_user_enabled {
-                    ui.label("(disabled during panning)");
-                }
-
-                ui.horizontal(|ui| {
-                    ui.label("Edge Fade:");
-                    ui.add(egui::Slider::new(tile_fade_strength, 0.0..=1.0).step_by(0.05));
-                });
-
-                if *traces_user_enabled {
-                    ui.horizontal(|ui| {
-                        ui.label("Trace Fade:");
-                        ui.add(egui::Slider::new(trace_fade, 0.0..=1.0).step_by(0.01));
-                    });
-                }
-
-                ui.horizontal(|ui| {
-                    ui.label("Particle Size:");
-                    ui.add(
-                        egui::Slider::new(&mut _app_settings.particle_size, 0.1..=1.0)
-                            .step_by(0.01),
-                    );
-                });
-            });
-    }
-}
-
-pub fn render_controls_window(ctx: &egui::Context, show_controls_window: &mut bool) {
-    if *show_controls_window {
-        egui::Window::new("Controls")
-            .open(show_controls_window)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.heading("Keyboard Controls");
-                ui.separator();
-
-                ui.label("🎮 Simulation:");
-                ui.label("  [SPACE] - Play/Pause simulation");
-                ui.label("  [P] - Reset particle positions");
-                ui.label("  [C] - Reset particle types");
-                ui.label("  [M] - Generate new random matrix");
-                ui.label("  [B] - Toggle boundaries (wrap/clamp)");
-
-                ui.separator();
-
-                ui.label("🖥️ Display:");
-                ui.label("  [ESC] - Toggle GUI visibility");
-                ui.label("  [T] - Toggle particle traces");
-                ui.label("  [G] - Show graphics settings window");
-
-                ui.separator();
-
-                ui.label("📷 Camera Controls:");
-                ui.label("  • Mouse wheel - Zoom in/out");
-                ui.label("  • [WASD] or Arrow Keys - Pan camera");
-                ui.label("  • [Z] - Reset zoom");
-                ui.label("  • [Shift+Z] - Fit to window");
-
-                ui.separator();
-
-                ui.label("🖱️ Mouse Interaction:");
-                ui.label("  • Left Click - Repel particles");
-                ui.label("  • Right Click - Attract particles");
-            });
-    }
-}
-
-pub fn render_about_window(ctx: &egui::Context, show_about_window: &mut bool) {
-    if *show_about_window {
-        egui::Window::new("About")
-            .open(show_about_window)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.heading("🦀 Particle Life Simulator");
-                ui.separator();
-
-                ui.label("A high-performance particle simulation");
-                ui.label("converted from Java to Rust");
-
-                ui.separator();
-
-                ui.label("🔧 Technology Stack:");
-                ui.label("  • Rust programming language");
-                ui.label("  • egui for immediate mode GUI");
-                ui.label("  • wgpu for GPU-accelerated rendering");
-                ui.label("  • nalgebra for vector mathematics");
-
-                ui.separator();
-
-                ui.label("Originally inspired by the Java Particle Life project");
-                ui.label("Converted with Claude Code");
-            });
-    }
 }

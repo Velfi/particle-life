@@ -1,11 +1,31 @@
+//! Physics simulation system for the particle life simulator
+//! 
+//! This module implements the core physics simulation, including:
+//! - Particle state management and updates
+//! - Force calculations between particles
+//! - Spatial partitioning for efficient neighbor finding
+//! - Various particle type and position patterns
+//! - Interaction matrix generation algorithms
+//! 
+//! The simulation uses a spatial grid for efficient neighbor finding and parallel
+//! processing for force calculations.
+
 use nalgebra::Vector3;
 use rand::Rng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+/// Type alias for particle position in 3D space
 pub type Position = Vector3<f64>;
+/// Type alias for particle velocity in 3D space
 pub type Velocity = Vector3<f64>;
 
+/// Represents a single particle in the simulation
+/// 
+/// Each particle has:
+/// - A position in 3D space
+/// - A velocity vector
+/// - A type ID that determines its interaction rules
 #[derive(Debug, Clone)]
 pub struct Particle {
     pub position: Position,
@@ -14,6 +34,7 @@ pub struct Particle {
 }
 
 impl Particle {
+    /// Creates a new particle with default values
     pub fn new() -> Self {
         Self {
             position: Position::new(0.0, 0.0, 0.0),
@@ -23,6 +44,14 @@ impl Particle {
     }
 }
 
+/// Configuration settings for the physics simulation
+/// 
+/// Controls various aspects of particle behavior:
+/// - wrap: Whether particles wrap around world boundaries
+/// - rmax: Maximum interaction radius between particles
+/// - friction: Velocity damping factor
+/// - force: Base force strength
+/// - dt: Time step for simulation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhysicsSettings {
     pub wrap: bool,
@@ -44,10 +73,24 @@ impl Default for PhysicsSettings {
     }
 }
 
+/// Trait for setting initial particle positions
+/// 
+/// Implementations can create various patterns like:
+/// - Random distribution
+/// - Circular arrangements
+/// - Grid patterns
+/// - Type-specific positions
 pub trait PositionSetter: Send + Sync {
     fn set_position(&self, position: &mut Position, type_id: usize, n_types: usize);
 }
 
+/// Trait for assigning particle types
+/// 
+/// Implementations can create various type distributions:
+/// - Random assignment
+/// - Position-based patterns
+/// - Velocity-based patterns
+/// - Time-based changes
 pub trait TypeSetter: Send + Sync {
     fn set_type(
         &self,
@@ -58,10 +101,23 @@ pub trait TypeSetter: Send + Sync {
     ) -> usize;
 }
 
+/// Trait for generating interaction matrices
+/// 
+/// Implementations can create various interaction patterns:
+/// - Random interactions
+/// - Symmetric patterns
+/// - Chain-like structures
+/// - Predator-prey relationships
 pub trait MatrixGenerator: Send + Sync {
     fn generate(&self, size: usize) -> Matrix;
 }
 
+/// Represents the interaction matrix between particle types
+/// 
+/// The matrix defines how different particle types interact:
+/// - Positive values: Attraction
+/// - Negative values: Repulsion
+/// - Zero: No interaction
 #[derive(Debug, Clone)]
 pub struct Matrix {
     data: Vec<Vec<f64>>,
@@ -69,6 +125,7 @@ pub struct Matrix {
 }
 
 impl Matrix {
+    /// Creates a new matrix of the specified size
     pub fn new(size: usize) -> Self {
         Self {
             data: vec![vec![0.0; size]; size],
@@ -76,18 +133,22 @@ impl Matrix {
         }
     }
 
+    /// Returns the size of the matrix (number of particle types)
     pub fn size(&self) -> usize {
         self.size
     }
 
+    /// Gets the interaction strength between two particle types
     pub fn get(&self, i: usize, j: usize) -> f64 {
         self.data[i][j]
     }
 
+    /// Sets the interaction strength between two particle types
     pub fn set(&mut self, i: usize, j: usize, value: f64) {
         self.data[i][j] = value;
     }
 
+    /// Randomizes all interaction values
     pub fn randomize(&mut self) {
         let mut rng = rand::thread_rng();
         self.data.iter_mut().for_each(|row| {
@@ -98,6 +159,10 @@ impl Matrix {
     }
 }
 
+/// Immutable snapshot of the physics state
+/// 
+/// Used for thread-safe access to particle data during rendering
+#[derive(Debug, Clone)]
 pub struct PhysicsSnapshot {
     pub positions: Vec<Position>,
     pub velocities: Vec<Velocity>,
@@ -107,6 +172,7 @@ pub struct PhysicsSnapshot {
 }
 
 impl PhysicsSnapshot {
+    /// Creates a new empty snapshot
     pub fn new() -> Self {
         Self {
             positions: Vec::new(),
@@ -118,6 +184,13 @@ impl PhysicsSnapshot {
     }
 }
 
+/// Main physics engine that manages the simulation
+/// 
+/// Handles:
+/// - Particle state updates
+/// - Force calculations
+/// - Spatial partitioning
+/// - Type and position management
 pub struct ExtendedPhysics {
     pub particles: Vec<Particle>,
     pub settings: PhysicsSettings,
@@ -129,6 +202,7 @@ pub struct ExtendedPhysics {
 }
 
 impl ExtendedPhysics {
+    /// Creates a new physics engine with the specified position setter and matrix generator
     pub fn new(
         position_setter: Box<dyn PositionSetter>,
         matrix_generator: Box<dyn MatrixGenerator>,
@@ -147,6 +221,9 @@ impl ExtendedPhysics {
         }
     }
 
+    /// Sets the number of particles in the simulation
+    /// 
+    /// Creates new particles with positions set by the current position setter
     pub fn set_particle_count(&mut self, count: usize) {
         self.particles.clear();
         self.force_buffer.clear();
@@ -162,11 +239,13 @@ impl ExtendedPhysics {
         }
     }
 
+    /// Sets the size of the interaction matrix and updates particle types
     pub fn set_matrix_size(&mut self, size: usize) {
         self.matrix = self.matrix_generator.generate(size);
         self.ensure_types();
     }
 
+    /// Ensures all particle types are valid for the current matrix size
     pub fn ensure_types(&mut self) {
         for particle in &mut self.particles {
             if particle.type_id >= self.matrix.size() {
@@ -175,6 +254,7 @@ impl ExtendedPhysics {
         }
     }
 
+    /// Updates all particle positions using the current position setter
     pub fn set_positions(&mut self) {
         for particle in &mut self.particles {
             self.position_setter.set_position(
@@ -185,6 +265,7 @@ impl ExtendedPhysics {
         }
     }
 
+    /// Updates particle positions using a specific position setter
     pub fn set_positions_with_setter(&mut self, position_setter: &dyn PositionSetter) {
         for particle in &mut self.particles {
             position_setter.set_position(
@@ -195,6 +276,7 @@ impl ExtendedPhysics {
         }
     }
 
+    /// Updates particle types using a specific type setter
     pub fn set_types_with_setter(&mut self, type_setter: &dyn TypeSetter) {
         for particle in &mut self.particles {
             particle.type_id = type_setter.set_type(
@@ -206,14 +288,17 @@ impl ExtendedPhysics {
         }
     }
 
+    /// Generates a new interaction matrix using the current generator
     pub fn generate_matrix(&mut self) {
         self.matrix = self.matrix_generator.generate(self.matrix.size());
     }
 
+    /// Generates a new interaction matrix using a specific generator
     pub fn generate_matrix_with_generator(&mut self, matrix_generator: &dyn MatrixGenerator) {
         self.matrix = matrix_generator.generate(self.matrix.size());
     }
 
+    /// Returns the count of particles for each type
     pub fn get_type_count(&self) -> Vec<usize> {
         let mut type_count = vec![0; self.matrix.size()];
         for &type_id in self.particles.iter().map(|p| &p.type_id) {
@@ -224,6 +309,7 @@ impl ExtendedPhysics {
         type_count
     }
 
+    /// Sets the number of particles for each type
     pub fn set_type_count(&mut self, new_type_count: &[usize]) {
         self.particles.clear();
 
@@ -241,6 +327,7 @@ impl ExtendedPhysics {
         }
     }
 
+    /// Sets an equal number of particles for each type
     pub fn set_type_count_equal(&mut self) {
         let total_particles = self.particles.len();
         let types_count = self.matrix.size();
@@ -254,10 +341,23 @@ impl ExtendedPhysics {
         self.set_type_count(&new_type_count);
     }
 
+    /// Updates the physics simulation for one time step
+    /// 
+    /// This function:
+    /// 1. Updates the spatial grid
+    /// 2. Calculates forces between particles
+    /// 3. Updates particle positions and velocities
+    /// 4. Handles world boundaries
     pub fn update(&mut self) {
         self.update_with_cursor(None, 0.0, 0.0);
     }
 
+    /// Updates the physics simulation with cursor interaction
+    /// 
+    /// Parameters:
+    /// - cursor_pos: Optional cursor position in world space
+    /// - cursor_size: Radius of cursor influence
+    /// - cursor_strength: Strength of cursor force
     pub fn update_with_cursor(
         &mut self,
         cursor_pos: Option<Vector3<f64>>,
@@ -437,6 +537,9 @@ impl ExtendedPhysics {
             });
     }
 
+    /// Takes a snapshot of the current physics state
+    /// 
+    /// Returns an immutable copy of particle data for rendering
     pub fn take_snapshot(&self) -> PhysicsSnapshot {
         PhysicsSnapshot {
             positions: self.particles.iter().map(|p| p.position).collect(),
@@ -1013,6 +1116,7 @@ impl SpatialGrid {
                     gy
                 } as usize;
 
+                // Add all particles from this cell to neighbor list
                 if wrapped_gx < self.grid_size && wrapped_gy < self.grid_size {
                     let cell_idx = wrapped_gy * self.grid_size + wrapped_gx;
                     neighbors.extend(&self.grid[cell_idx]);
