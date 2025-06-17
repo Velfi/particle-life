@@ -14,6 +14,7 @@
 
 // Module declarations for the particle life simulator
 mod app_settings;  // Application configuration and settings management
+mod lut_manager;   // Lookup tables for color mapping
 mod physics;       // Physics simulation and particle behavior
 mod rendering;     // Graphics rendering and visual display
 mod shaders;       // GPU shader programs for rendering
@@ -68,8 +69,9 @@ use physics::{
     ZeroMatrixGenerator,
 };
 use rendering::{
-    Camera, HexPalette, Palette, ParticleRenderer,
+    Camera, ParticleRenderer, LutColorMapper,
 };
+use lut_manager::LutManager;
 use shaders::{FadeShader, ParticleShader, UniformData};
 use ui::{Clock, Loop, SelectionManager};
 
@@ -163,8 +165,12 @@ struct Application {
 
     // Configuration option managers
 
-    /// Available color palettes
-    palettes: SelectionManager<Box<dyn rendering::Palette>>,
+    /// Available LUT color mappers
+    lut_mappers: SelectionManager<LutColorMapper>,
+    /// Current LUT manager for loading LUTs
+    lut_manager: LutManager,
+    /// Cache for LUT previews to avoid regenerating them every frame
+    lut_preview_cache: std::collections::HashMap<(String, bool), Vec<egui::Color32>>,
     /// Particle initial position patterns
     position_setters: SelectionManager<Box<dyn physics::PositionSetter>>,
     /// Interaction matrix generators
@@ -254,7 +260,7 @@ impl Application {
             Self::create_world_texture(&device, &config, &mut egui_renderer);
         let (physics, physics_snapshot, physics_loop, new_snapshot_available) =
             Self::init_physics();
-        let (palettes, position_setters, matrix_generators, type_setters) =
+        let (lut_mappers, lut_manager, position_setters, matrix_generators, type_setters) =
             Self::init_selection_managers();
         let app_settings = AppSettings::load().unwrap_or_default();
 
@@ -289,7 +295,9 @@ impl Application {
             prev_camera_position: nalgebra::Vector3::new(0.5, 0.5, 0.0),
             prev_camera_size: 2.0,
             local_matrix: vec![vec![0.0; 4]; 4],
-            palettes,
+            lut_mappers,
+            lut_manager,
+            lut_preview_cache: std::collections::HashMap::new(),
             position_setters,
             matrix_generators,
             type_setters,
@@ -500,52 +508,51 @@ impl Application {
     /// Initialize all configuration option managers
     /// 
     /// Sets up managers for:
-    /// - Color palettes
+    /// - LUT color mappers
     /// - Particle position patterns
     /// - Interaction matrix generators
     /// - Particle type distributions
     #[allow(clippy::type_complexity)]
     fn init_selection_managers() -> (
-        SelectionManager<Box<dyn rendering::Palette>>,
+        SelectionManager<LutColorMapper>,
+        LutManager,
         SelectionManager<Box<dyn physics::PositionSetter>>,
         SelectionManager<Box<dyn physics::MatrixGenerator>>,
         SelectionManager<Box<dyn physics::TypeSetter>>,
     ) {
-        let palettes = Self::init_palettes();
+        let (lut_mappers, lut_manager) = Self::init_luts();
         let position_setters = Self::init_position_setters();
         let matrix_generators = Self::init_matrix_generators();
         let type_setters = Self::init_type_setters();
-        (palettes, position_setters, matrix_generators, type_setters)
+        (lut_mappers, lut_manager, position_setters, matrix_generators, type_setters)
     }
 
-    /// Load color palettes from hex files in the palettes directory
-    fn init_palettes() -> SelectionManager<Box<dyn rendering::Palette>> {
-        let mut palette_list = Vec::new();
-
-        // Load Endesga-8 palette first to make it default
-        if let Ok(hex_palette) = HexPalette::load_from_file("palettes/endesga-8.hex") {
-            let name = hex_palette.name().to_string();
-            palette_list.push((name, Box::new(hex_palette) as Box<dyn rendering::Palette>));
-        }
-
-        // Load other hex palettes
-        if let Ok(entries) = std::fs::read_dir("palettes") {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|s| s.to_str()) == Some("hex") {
-                    // Skip endesga-8.hex as we already loaded it
-                    if path.file_name().unwrap() == "endesga-8.hex" {
-                        continue;
-                    }
-                    if let Ok(hex_palette) = HexPalette::load_from_file(path.to_str().unwrap()) {
-                        let name = hex_palette.name().to_string();
-                        palette_list.push((name, Box::new(hex_palette) as Box<dyn rendering::Palette>));
-                    }
-                }
+    /// Load LUTs and create color mappers
+    fn init_luts() -> (SelectionManager<LutColorMapper>, LutManager) {
+        let lut_manager = LutManager::new();
+        let mut lut_mappers = Vec::new();
+        
+        // Default number of species for initial LUT setup
+        let default_species_count = 4;
+        
+        // Load all available LUTs
+        for lut_name in lut_manager.get_available_luts() {
+            if let Ok(lut_data) = lut_manager.load_lut(&lut_name) {
+                let mapper = LutColorMapper::new(lut_data, default_species_count);
+                let name = mapper.name().to_string();
+                lut_mappers.push((name, mapper));
             }
         }
-
-        SelectionManager::new(palette_list)
+        
+        // If no LUTs were loaded, create a default one
+        if lut_mappers.is_empty() {
+            let default_lut = lut_manager.get_default_lut();
+            let mapper = LutColorMapper::new(default_lut, default_species_count);
+            let name = mapper.name().to_string();
+            lut_mappers.push((name, mapper));
+        }
+        
+        (SelectionManager::new(lut_mappers), lut_manager)
     }
 
     /// Initialize available particle position setting patterns
@@ -707,6 +714,9 @@ impl Application {
                 });
             });
 
+        // Update LUT mapper for current number of species
+        self.lut_mappers.get_active_mut().update_species_count(matrix_size);
+
         // Buffer initial particle data (for CPU renderer fallback)
         self.particle_renderer.buffer_particle_data(
             &self.device,
@@ -714,7 +724,7 @@ impl Application {
             &self.physics_snapshot.positions,
             &self.physics_snapshot.velocities,
             &self.physics_snapshot.types,
-            self.palettes.get_active().as_ref(),
+            self.lut_mappers.get_active(),
         );
 
         println!(
@@ -879,6 +889,8 @@ impl Application {
                         self.local_matrix[i][j] = self.physics.matrix.get(i, j);
                     }
                 }
+                // Update LUT mapper for current number of species
+                self.lut_mappers.get_active_mut().update_species_count(matrix_size);
             }
             KeyCode::KeyB => self.physics.settings.wrap = !self.physics.settings.wrap,
             KeyCode::KeyZ => {
@@ -1112,7 +1124,7 @@ impl Application {
             &self.physics_snapshot.positions,
             &self.physics_snapshot.velocities,
             &self.physics_snapshot.types,
-            self.palettes.get_active().as_ref(),
+            self.lut_mappers.get_active(),
         );
     }
 
@@ -1148,7 +1160,13 @@ impl Application {
                         load: if self.traces {
                             wgpu::LoadOp::Load // Always load for fading
                         } else {
-                            wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+                            let bg_color = self.lut_mappers.get_active().get_background_color();
+                            wgpu::LoadOp::Clear(wgpu::Color {
+                                r: bg_color.r as f64,
+                                g: bg_color.g as f64,
+                                b: bg_color.b as f64,
+                                a: bg_color.a as f64,
+                            })
                         },
                         store: wgpu::StoreOp::Store,
                     },
@@ -1165,8 +1183,9 @@ impl Application {
 
             // Apply fade effect when traces are enabled
             if self.traces {
+                let bg_color = self.lut_mappers.get_active().get_background_color();
                 self.fade_shader
-                    .update_uniforms(&self.queue, self.trace_fade);
+                    .update_uniforms(&self.queue, self.trace_fade, [bg_color.r, bg_color.g, bg_color.b, bg_color.a]);
                 self.fade_shader.render(&mut render_pass);
             }
 
@@ -1208,7 +1227,9 @@ impl Application {
         let physics_snapshot = &self.physics_snapshot;
         let render_clock = &self.render_clock;
         let app_settings = &mut self.app_settings;
-        let palettes = &mut self.palettes;
+        let lut_mappers = &mut self.lut_mappers;
+        let lut_manager = &self.lut_manager;
+        let lut_preview_cache = &mut self.lut_preview_cache;
         let position_setters = &mut self.position_setters;
         let type_setters = &mut self.type_setters;
         let matrix_generators = &mut self.matrix_generators;
@@ -1238,7 +1259,9 @@ impl Application {
                 physics_snapshot,
                 render_clock,
                 app_settings,
-                palettes,
+                lut_mappers,
+                lut_manager,
+                lut_preview_cache,
                 position_setters,
                 type_setters,
                 matrix_generators,

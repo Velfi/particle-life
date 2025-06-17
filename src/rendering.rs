@@ -1,5 +1,6 @@
 use crate::physics::Position;
-use crate::shaders::{hsv_to_rgb, ParticleShader, ParticleVertex};
+use crate::shaders::{ParticleShader, ParticleVertex};
+use crate::lut_manager::LutData;
 use nalgebra::{Matrix4, Vector3};
 use wgpu::{Buffer, BufferUsages, Device};
 
@@ -23,7 +24,7 @@ impl ParticleRenderer {
         positions: &[Position],
         velocities: &[nalgebra::Vector3<f64>],
         types: &[usize],
-        palette: &dyn Palette,
+        lut: &LutColorMapper,
     ) {
         if positions.is_empty() {
             return;
@@ -57,7 +58,7 @@ impl ParticleRenderer {
         for ((pos, _vel), &particle_type) in
             positions.iter().zip(velocities.iter()).zip(types.iter())
         {
-            let color = palette.get_color(particle_type, max_types);
+            let color = lut.get_particle_color(particle_type, max_types);
 
             // Create 6 vertices for this particle (2 triangles)
             for &quad_vertex in &quad_vertices {
@@ -109,115 +110,144 @@ pub struct Color {
 }
 
 impl Color {
-    pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
-        Self { r, g, b, a }
-    }
-
-    pub fn from_hsv(h: f32, s: f32, v: f32) -> Self {
-        let rgb = hsv_to_rgb(h, s, v);
-        Self::new(rgb[0], rgb[1], rgb[2], 1.0)
-    }
-}
-
-pub trait Palette: Send + Sync {
-    fn get_color(&self, type_index: usize, total_types: usize) -> Color;
-    fn name(&self) -> &str;
-}
-
-pub struct NaturalRainbowPalette;
-
-impl Palette for NaturalRainbowPalette {
-    fn get_color(&self, type_index: usize, total_types: usize) -> Color {
-        let hue = (type_index as f32 / total_types.max(1) as f32) * 360.0;
-        Color::from_hsv(hue, 0.7, 0.9)
-    }
-
-    fn name(&self) -> &str {
-        "Natural Rainbow"
-    }
-}
-
-pub struct SimpleRainbowPalette;
-
-impl Palette for SimpleRainbowPalette {
-    fn get_color(&self, type_index: usize, total_types: usize) -> Color {
-        let hue = (type_index as f32 / total_types.max(1) as f32) * 360.0;
-        Color::from_hsv(hue, 1.0, 1.0)
-    }
-
-    fn name(&self) -> &str {
-        "Simple Rainbow"
-    }
-}
-
-pub struct SunsetPalette;
-
-impl Palette for SunsetPalette {
-    fn get_color(&self, type_index: usize, total_types: usize) -> Color {
-        let t = type_index as f32 / total_types.max(1) as f32;
-        // Transition from red to orange to yellow
-        let hue = t * 60.0; // 0 to 60 degrees (red to yellow)
-        Color::from_hsv(hue, 0.8, 0.9)
-    }
-
-    fn name(&self) -> &str {
-        "Sunset"
-    }
-}
-
-pub struct HexPalette {
-    colors: Vec<Color>,
-    name: String,
-}
-
-impl HexPalette {
-    pub fn load_from_file(file_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let content = std::fs::read_to_string(file_path)?;
-        let mut colors = Vec::new();
-
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-
-            // Parse hex color (expecting 6 characters: RRGGBB)
-            if line.len() != 6 {
-                continue;
-            }
-
-            let r = u8::from_str_radix(&line[0..2], 16)? as f32 / 255.0;
-            let g = u8::from_str_radix(&line[2..4], 16)? as f32 / 255.0;
-            let b = u8::from_str_radix(&line[4..6], 16)? as f32 / 255.0;
-
-            colors.push(Color { r, g, b, a: 1.0 });
+    pub fn from_lut_bytes(r: u8, g: u8, b: u8) -> Self {
+        Self {
+            r: r as f32 / 255.0,
+            g: g as f32 / 255.0,
+            b: b as f32 / 255.0,
+            a: 1.0,
         }
-
-        if colors.is_empty() {
-            return Err("No valid colors found in palette file".into());
-        }
-
-        // Extract name from file path
-        let file_name = std::path::Path::new(file_path)
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .unwrap_or("Unknown")
-            .to_string();
-
-        Ok(HexPalette {
-            colors,
-            name: file_name,
-        })
     }
 }
 
-impl Palette for HexPalette {
-    fn get_color(&self, type_index: usize, _total_types: usize) -> Color {
-        self.colors[type_index % self.colors.len()]
+/// LUT-based color mapper that samples equidistant points along the LUT
+/// The first sample is used as background color, subsequent samples are particle colors
+pub struct LutColorMapper {
+    lut_data: LutData,
+    background_color: Color,
+    particle_colors: Vec<Color>,
+    reversed: bool,
+}
+
+impl LutColorMapper {
+    /// Creates a new LUT color mapper from LUT data
+    /// Samples n = num_species + 1 equidistant stops along the LUT
+    /// First stop is background color, other stops are particle colors
+    pub fn new(lut_data: LutData, num_species: usize) -> Self {
+        let n = num_species + 1;
+        let mut colors = Vec::with_capacity(n);
+        
+        // Sample n equidistant points along the LUT (0 to 255)
+        for i in 0..n {
+            let index = if n == 1 {
+                0
+            } else {
+                (i * 255) / (n - 1)
+            };
+            let index = index.min(255);
+            
+            let color = Color::from_lut_bytes(
+                lut_data.red[index],
+                lut_data.green[index],
+                lut_data.blue[index],
+            );
+            colors.push(color);
+        }
+        
+        let background_color = colors[0];
+        let particle_colors = if colors.len() > 1 {
+            colors[1..].to_vec()
+        } else {
+            vec![colors[0]] // Fallback if only one color
+        };
+        
+        Self {
+            lut_data,
+            background_color,
+            particle_colors,
+            reversed: false,
+        }
+    }
+    
+    /// Gets a particle color by type index
+    pub fn get_particle_color(&self, type_index: usize, total_types: usize) -> Color {
+        if self.particle_colors.is_empty() {
+            self.background_color
+        } else {
+            // If the number of types has changed, we need to regenerate colors
+            if total_types != self.particle_colors.len() {
+                // This is a temporary fix - the actual regeneration should happen elsewhere
+                // For now, we'll just use modulo to cycle through available colors
+                self.particle_colors[type_index % self.particle_colors.len()]
+            } else {
+                self.particle_colors[type_index]
+            }
+        }
+    }
+    
+    /// Gets the background color from the LUT
+    pub fn get_background_color(&self) -> Color {
+        self.background_color
+    }
+    
+    /// Gets the name of the LUT
+    pub fn name(&self) -> &str {
+        &self.lut_data.name
+    }
+    
+    /// Gets whether the LUT is reversed
+    pub fn is_reversed(&self) -> bool {
+        self.reversed
+    }
+    
+    /// Sets whether the LUT should be reversed
+    pub fn set_reversed(&mut self, reversed: bool) {
+        if self.reversed != reversed {
+            self.reversed = reversed;
+            // Regenerate colors with current species count
+            let num_species = self.particle_colors.len();
+            self.regenerate_colors(num_species);
+        }
+    }
+    
+    /// Regenerates colors based on current settings
+    fn regenerate_colors(&mut self, num_species: usize) {
+        let n = num_species + 1;
+        let mut colors = Vec::with_capacity(n);
+        
+        // Sample n equidistant points along the LUT (0 to 255)
+        for i in 0..n {
+            let index = if n == 1 {
+                0
+            } else {
+                if self.reversed {
+                    // Reverse the sampling order
+                    255 - (i * 255) / (n - 1)
+                } else {
+                    (i * 255) / (n - 1)
+                }
+            };
+            let index = index.min(255);
+            
+            let color = Color::from_lut_bytes(
+                self.lut_data.red[index],
+                self.lut_data.green[index],
+                self.lut_data.blue[index],
+            );
+            colors.push(color);
+        }
+        
+        self.background_color = colors[0];
+        self.particle_colors = if colors.len() > 1 {
+            colors[1..].to_vec()
+        } else {
+            vec![colors[0]] // Fallback if only one color
+        };
     }
 
-    fn name(&self) -> &str {
-        &self.name
+    /// Updates the number of species and regenerates colors accordingly
+    pub fn update_species_count(&mut self, num_species: usize) {
+        self.regenerate_colors(num_species);
     }
 }
 

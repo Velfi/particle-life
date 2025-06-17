@@ -4,22 +4,20 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-winit = "0.29"
-egui = "0.26"
-egui-winit = "0.26"
-egui-wgpu = "0.26"
-wgpu = { version = "0.19", features = ["wgsl"] }
-pollster = "0.3"
-tokio = { version = "1.36", features = ["full"] }
-raw-window-handle = "0.6"
-rand = "0.8"
-nalgebra = "0.32"
-serde = { version = "1.0", features = ["derive"] }
-toml = "0.8"
-zip = "0.6"
-image = "0.24"
 bytemuck = { version = "1.0", features = ["derive"] }
-num_cpus = "1.0"
+dirs = "5.0"
+egui = "0.26"
+egui-wgpu = "0.26"
+egui-winit = "0.26"
 env_logger = "0.10"
+lazy_static = "1.4"
+nalgebra = "0.32"
+num_cpus = "1.0"
+rand = "0.8"
+raw-window-handle = "0.6"
 rayon = "1.8"
-futures-intrusive = "0.5"
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.36", features = ["full"] }
+toml = "0.8"
+wgpu = { version = "0.19", features = ["wgsl"] }
+winit = "0.29"

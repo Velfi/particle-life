@@ -202,36 +202,6 @@ impl ParticleShader {
     }
 }
 
-/// Converts HSV color to RGB
-/// 
-/// Parameters:
-/// - h: Hue (0-360)
-/// - s: Saturation (0-1)
-/// - v: Value (0-1)
-/// 
-/// Returns RGB color as [r, g, b] with values in range 0-1
-pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [f32; 3] {
-    let c = v * s;
-    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
-    let m = v - c;
-
-    let (r, g, b) = if (0.0..60.0).contains(&h) {
-        (c, x, 0.0)
-    } else if (60.0..120.0).contains(&h) {
-        (x, c, 0.0)
-    } else if (120.0..180.0).contains(&h) {
-        (0.0, c, x)
-    } else if (180.0..240.0).contains(&h) {
-        (0.0, x, c)
-    } else if (240.0..300.0).contains(&h) {
-        (x, 0.0, c)
-    } else {
-        (c, 0.0, x)
-    };
-
-    [r + m, g + m, b + m]
-}
-
 /// Manages the screen fade effect shader
 /// 
 /// Handles:
@@ -248,11 +218,13 @@ pub struct FadeShader {
 /// 
 /// Contains:
 /// - fade_factor: Strength of the fade effect (0-1)
+/// - background_color: Color to fade to
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct FadeUniformData {
     fade_factor: f32,
-    _padding: [f32; 3],
+    background_color: [f32; 4],
+    _padding: [f32; 3], // Add padding to match shader's 32-byte alignment
 }
 
 impl FadeShader {
@@ -355,9 +327,11 @@ impl FadeShader {
     /// Parameters:
     /// - queue: The WebGPU queue for buffer updates
     /// - fade_factor: New fade factor (0-1)
-    pub fn update_uniforms(&self, queue: &wgpu::Queue, fade_factor: f32) {
+    /// - background_color: Color to fade to
+    pub fn update_uniforms(&self, queue: &wgpu::Queue, fade_factor: f32, background_color: [f32; 4]) {
         let uniform_data = FadeUniformData {
             fade_factor,
+            background_color,
             _padding: [0.0; 3],
         };
         queue.write_buffer(

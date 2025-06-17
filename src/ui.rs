@@ -51,6 +51,11 @@ impl<T> SelectionManager<T> {
         &self.items[self.active_index].object
     }
 
+    /// Returns a mutable reference to the currently active item
+    pub fn get_active_mut(&mut self) -> &mut T {
+        &mut self.items[self.active_index].object
+    }
+
     /// Returns the name of the currently active item
     pub fn get_active_name(&self) -> &str {
         &self.items[self.active_index].name

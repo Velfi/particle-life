@@ -2,7 +2,7 @@
 //
 // This shader implements a screen-space fade effect:
 // - Renders a fullscreen quad
-// - Applies a semi-transparent black overlay
+// - Applies a semi-transparent background color overlay
 // - Controls fade strength with a uniform
 //
 // The fade effect is used to create motion trails and visual effects
@@ -12,6 +12,8 @@
 struct FadeUniforms {
     /// Fade strength (0.0 = no fade, 1.0 = complete fade)
     fade_factor: f32,
+    /// Background color for fading
+    background_color: vec4<f32>,
 }
 
 // Uniform buffer for fade settings
@@ -50,14 +52,14 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 
 /// Fragment shader entry point
 /// 
-/// Applies a semi-transparent black overlay to create the fade effect.
+/// Applies a semi-transparent background color overlay to create the fade effect.
 /// The fade_factor controls the strength of the fade:
 /// - 0.0: No fade (fully transparent)
-/// - 1.0: Complete fade (fully opaque black)
+/// - 1.0: Complete fade (fully opaque background color)
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Apply fade effect by outputting semi-transparent black
+    // Apply fade effect by outputting semi-transparent background color
     // fade_factor controls how much to fade (0.0 = no fade, 1.0 = complete fade)
     let alpha = 1.0 - uniforms.fade_factor;
-    return vec4<f32>(0.0, 0.0, 0.0, alpha);
+    return vec4<f32>(uniforms.background_color.rgb, uniforms.background_color.a * alpha);
 }

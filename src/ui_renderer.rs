@@ -14,8 +14,85 @@
 
 use crate::app_settings::AppSettings;
 use crate::physics::{ExtendedPhysics, PhysicsSnapshot};
-use crate::rendering;
+use crate::rendering::LutColorMapper;
+use crate::lut_manager::LutManager;
 use crate::ui::{Clock, SelectionManager};
+
+/// Helper function to generate a LUT preview
+fn generate_lut_preview(lut_manager: &LutManager, lut_name: &str, reversed: bool) -> Vec<egui::Color32> {
+    if let Ok(lut_data) = lut_manager.load_lut(lut_name) {
+        let mut preview = Vec::with_capacity(256);
+        
+        for i in 0..256 {
+            let index = if reversed {
+                255 - i
+            } else {
+                i
+            };
+            
+            let color = egui::Color32::from_rgb(
+                lut_data.red[index],
+                lut_data.green[index],
+                lut_data.blue[index],
+            );
+            preview.push(color);
+        }
+        
+        preview
+    } else {
+        // Fallback to gray gradient if LUT can't be loaded
+        (0..256).map(|i| egui::Color32::from_gray(i as u8)).collect()
+    }
+}
+
+/// Helper function to get or generate a cached LUT preview
+fn get_lut_preview(
+    lut_manager: &LutManager,
+    lut_preview_cache: &mut std::collections::HashMap<(String, bool), Vec<egui::Color32>>,
+    lut_name: &str,
+    reversed: bool,
+) -> Vec<egui::Color32> {
+    let cache_key = (lut_name.to_string(), reversed);
+    
+    if let Some(preview) = lut_preview_cache.get(&cache_key) {
+        preview.clone()
+    } else {
+        let preview = generate_lut_preview(lut_manager, lut_name, reversed);
+        lut_preview_cache.insert(cache_key, preview.clone());
+        preview
+    }
+}
+
+/// Helper function to draw a gradient preview
+fn draw_gradient_preview(ui: &mut egui::Ui, preview: &[egui::Color32], width: f32, height: f32) {
+    let rect = ui.allocate_rect(
+        egui::Rect::from_min_size(
+            ui.min_rect().min,
+            egui::vec2(width, height),
+        ),
+        egui::Sense::hover(),
+    );
+    let painter = ui.painter();
+    let rect = rect.rect;
+    let gradient_width = rect.width();
+    let steps = 50; // Number of gradient steps
+    let step_width = gradient_width / steps as f32;
+    
+    for step in 0..steps {
+        let x = rect.min.x + step as f32 * step_width;
+        let t = step as f32 / steps as f32;
+        let idx = (t * 255.0) as usize;
+        let color = preview[idx];
+        painter.rect_filled(
+            egui::Rect::from_min_size(
+                egui::pos2(x, rect.min.y),
+                egui::vec2(step_width, rect.height()),
+            ),
+            0.0,
+            color,
+        );
+    }
+}
 
 /// Renders the main UI overlay
 #[allow(clippy::too_many_arguments)]
@@ -33,7 +110,9 @@ pub fn render_ui(
     physics_snapshot: &PhysicsSnapshot,
     render_clock: &Clock,
     app_settings: &mut AppSettings,
-    palettes: &mut SelectionManager<Box<dyn rendering::Palette>>,
+    lut_mappers: &mut SelectionManager<LutColorMapper>,
+    lut_manager: &LutManager,
+    lut_preview_cache: &mut std::collections::HashMap<(String, bool), Vec<egui::Color32>>,
     position_setters: &mut SelectionManager<Box<dyn crate::physics::PositionSetter>>,
     type_setters: &mut SelectionManager<Box<dyn crate::physics::TypeSetter>>,
     matrix_generators: &mut SelectionManager<Box<dyn crate::physics::MatrixGenerator>>,
@@ -63,26 +142,28 @@ pub fn render_ui(
         ctx,
         show_about_window,
     );
-    render_physics_panel(
-        ctx,
-        physics_loop_pause,
-        render_clock,
-        physics_time_avg,
-        physics_snapshot,
-        local_matrix,
-        physics,
-        matrix_generators,
-        position_setters,
-        type_setters,
-        app_settings,
-        palettes,
-        traces_user_enabled,
-        camera_is_moving,
-        cursor_size,
-        cursor_strength,
-        tile_fade_strength,
-        trace_fade,
-    );
+            render_physics_panel(
+            ctx,
+            physics_loop_pause,
+            render_clock,
+            physics_time_avg,
+            physics_snapshot,
+            local_matrix,
+            physics,
+            matrix_generators,
+            position_setters,
+            type_setters,
+            app_settings,
+            lut_mappers,
+            lut_manager,
+            lut_preview_cache,
+            traces_user_enabled,
+            camera_is_moving,
+            cursor_size,
+            cursor_strength,
+            tile_fade_strength,
+            trace_fade,
+        );
     render_about_window(ctx, show_about_window);
 }
 
@@ -133,11 +214,13 @@ pub fn render_physics_panel(
     physics_snapshot: &PhysicsSnapshot,
     local_matrix: &mut Vec<Vec<f64>>,
     physics: &mut ExtendedPhysics,
-    _matrix_generators: &mut SelectionManager<Box<dyn crate::physics::MatrixGenerator>>,
-    _position_setters: &mut SelectionManager<Box<dyn crate::physics::PositionSetter>>,
-    _type_setters: &mut SelectionManager<Box<dyn crate::physics::TypeSetter>>,
-    _app_settings: &mut AppSettings,
-    _palettes: &mut SelectionManager<Box<dyn rendering::Palette>>,
+    matrix_generators: &mut SelectionManager<Box<dyn crate::physics::MatrixGenerator>>,
+    position_setters: &mut SelectionManager<Box<dyn crate::physics::PositionSetter>>,
+    type_setters: &mut SelectionManager<Box<dyn crate::physics::TypeSetter>>,
+    app_settings: &mut AppSettings,
+    lut_mappers: &mut SelectionManager<LutColorMapper>,
+    lut_manager: &LutManager,
+    lut_preview_cache: &mut std::collections::HashMap<(String, bool), Vec<egui::Color32>>,
     traces_user_enabled: &mut bool,
     camera_is_moving: bool,
     cursor_size: &mut f64,
@@ -216,20 +299,22 @@ pub fn render_physics_panel(
                     physics_snapshot,
                     local_matrix,
                     physics,
-                    _matrix_generators,
-                    _palettes.get_active().as_ref(),
+                    matrix_generators,
+                    lut_mappers,
                 );
 
                 ui.separator();
 
-                render_particle_setup(ui, physics, _position_setters, _type_setters);
+                render_particle_setup(ui, physics, position_setters, type_setters);
 
                 ui.separator();
 
                 render_rendering_settings(
                     ui,
-                    _app_settings,
-                    _palettes,
+                    app_settings,
+                    lut_mappers,
+                    lut_manager,
+                    lut_preview_cache,
                     traces_user_enabled,
                     camera_is_moving,
                     tile_fade_strength,
@@ -246,7 +331,7 @@ pub fn render_physics_panel(
 
                 ui.separator();
 
-                render_type_distribution(ui, physics_snapshot, physics, _palettes);
+                render_type_distribution(ui, physics_snapshot, physics);
             });
         });
 }
@@ -264,8 +349,8 @@ pub fn render_matrix_editor(
     physics_snapshot: &PhysicsSnapshot,
     local_matrix: &mut Vec<Vec<f64>>,
     physics: &mut ExtendedPhysics,
-    _matrix_generators: &mut SelectionManager<Box<dyn crate::physics::MatrixGenerator>>,
-    palette: &dyn rendering::Palette,
+    matrix_generators: &mut SelectionManager<Box<dyn crate::physics::MatrixGenerator>>,
+    lut_mappers: &mut SelectionManager<LutColorMapper>,
 ) {
     ui.heading("Interaction Matrix");
 
@@ -301,12 +386,15 @@ pub fn render_matrix_editor(
                 ui.horizontal(|ui| {
                     ui.add_space(cell_size); // Top-left corner empty
                     for j in 0..matrix_size {
-                        let color = palette.get_color(j, matrix_size);
+                        let color = lut_mappers.get_active().get_particle_color(j, matrix_size);
                         let (rect, _resp) = ui.allocate_exact_size(
                             egui::Vec2::new(cell_size, cell_size / 2.0),
                             egui::Sense::hover(),
                         );
                         let center = rect.center();
+                        // Draw white border circle first
+                        ui.painter().circle_filled(center, dot_radius + 2.0, egui::Color32::WHITE);
+                        // Draw colored dot on top
                         ui.painter().circle_filled(center, dot_radius, egui::Color32::from_rgb(
                             (color.r * 255.0) as u8,
                             (color.g * 255.0) as u8,
@@ -318,12 +406,15 @@ pub fn render_matrix_editor(
                 (0..matrix_size).for_each(|i| {
                     ui.horizontal(|ui| {
                         // Left border dot (row)
-                        let color = palette.get_color(i, matrix_size);
+                        let color = lut_mappers.get_active().get_particle_color(i, matrix_size);
                         let (rect, _resp) = ui.allocate_exact_size(
                             egui::Vec2::new(cell_size / 2.0, cell_size),
                             egui::Sense::hover(),
                         );
                         let center = rect.center();
+                        // Draw white border circle first
+                        ui.painter().circle_filled(center, dot_radius + 2.0, egui::Color32::WHITE);
+                        // Draw colored dot on top
                         ui.painter().circle_filled(center, dot_radius, egui::Color32::from_rgb(
                             (color.r * 255.0) as u8,
                             (color.g * 255.0) as u8,
@@ -410,6 +501,8 @@ pub fn render_matrix_editor(
         {
             let new_size = matrix_size_input.max(2) as usize;
             physics.set_matrix_size(new_size);
+            // Update LUT mapper for new number of species
+            lut_mappers.get_active_mut().update_species_count(new_size);
             println!("Set matrix size to {}x{}", new_size, new_size);
         }
     });
@@ -417,10 +510,10 @@ pub fn render_matrix_editor(
     // Matrix generator selection
     ui.horizontal(|ui| {
         ui.label("Generator:");
-        let current_name = _matrix_generators.get_active_name().to_string();
-        let names = _matrix_generators.get_item_names();
+        let current_name = matrix_generators.get_active_name().to_string();
+        let names = matrix_generators.get_item_names();
         
-        let mut selected_index = _matrix_generators.get_active_index();
+        let mut selected_index = matrix_generators.get_active_index();
         let mut changed = false;
         egui::ComboBox::from_id_source("matrix_generator")
             .selected_text(&current_name)
@@ -434,22 +527,24 @@ pub fn render_matrix_editor(
             });
         
         if changed {
-            _matrix_generators.set_active(selected_index);
-            println!("Changed matrix generator to: {}", _matrix_generators.get_active_name());
+            matrix_generators.set_active(selected_index);
+            println!("Changed matrix generator to: {}", matrix_generators.get_active_name());
         }
     });
     
     // Matrix controls
     ui.horizontal(|ui| {
         if ui.button("Generate Matrix").clicked() {
-            physics.generate_matrix_with_generator(_matrix_generators.get_active().as_ref());
+            physics.generate_matrix_with_generator(matrix_generators.get_active().as_ref());
             // Update local copy using iterators
             local_matrix.iter_mut().enumerate().for_each(|(i, row)| {
                 row.iter_mut().enumerate().for_each(|(j, val)| {
                     *val = physics.matrix.get(i, j);
                 });
             });
-            println!("Generated matrix with {}", _matrix_generators.get_active_name());
+            // Update LUT mapper for current number of species
+            lut_mappers.get_active_mut().update_species_count(physics.matrix.size());
+            println!("Generated matrix with {}", matrix_generators.get_active_name());
         }
         
         if ui.button("Zero Matrix").clicked() {
@@ -576,7 +671,9 @@ pub fn render_about_window(ctx: &egui::Context, show_about_window: &mut bool) {
 pub fn render_rendering_settings(
     ui: &mut egui::Ui,
     _app_settings: &mut AppSettings,
-    _palettes: &mut SelectionManager<Box<dyn rendering::Palette>>,
+    lut_mappers: &mut SelectionManager<LutColorMapper>,
+    lut_manager: &LutManager,
+    lut_preview_cache: &mut std::collections::HashMap<(String, bool), Vec<egui::Color32>>,
     traces_user_enabled: &mut bool,
     camera_is_moving: bool,
     tile_fade_strength: &mut f32,
@@ -592,26 +689,70 @@ pub fn render_rendering_settings(
         }
     });
     
-    // Palette selection
-    ui.horizontal(|ui| {
-        ui.label("Color Palette:");
-        let current_name = _palettes.get_active_name().to_string();
-        let names = _palettes.get_item_names();
-        
-        let mut selected_index = _palettes.get_active_index();
-        egui::ComboBox::from_id_source("palette")
-            .selected_text(&current_name)
-            .show_ui(ui, |ui| {
-                for (i, name) in names.iter().enumerate() {
-                    if ui.selectable_label(i == selected_index, *name).clicked() {
-                        selected_index = i;
-                    }
+    // LUT controls grouped together
+    ui.group(|ui| {
+        ui.vertical(|ui| {
+            ui.label("🎨 Color LUT");
+            
+            // LUT selection with previews
+            ui.horizontal(|ui| {
+                ui.label("LUT:");
+                let current_name = lut_mappers.get_active_name().to_string();
+                let current_reversed = lut_mappers.get_active().is_reversed();
+                let names = lut_mappers.get_item_names();
+                
+                let mut selected_index = lut_mappers.get_active_index();
+                
+                // Show navigation buttons
+                if ui.button("◀").clicked() {
+                    selected_index = if selected_index == 0 {
+                        names.len() - 1
+                    } else {
+                        selected_index - 1
+                    };
+                }
+                
+                egui::ComboBox::from_id_source("lut")
+                    .selected_text(format!("{}{}", current_name, if current_reversed { " (Reversed)" } else { "" }))
+                    .width(250.0)
+                    .show_ui(ui, |ui| {
+                        for (i, name) in names.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                // Get preview for this LUT (both normal and reversed)
+                                let preview = get_lut_preview(lut_manager, lut_preview_cache, name, current_reversed);
+                                
+                                // Draw the gradient preview
+                                draw_gradient_preview(ui, &preview, 60.0, ui.spacing().interact_size.y);
+                                ui.add_space(5.0);
+                                
+                                // Add the LUT name
+                                if ui.selectable_value(&mut selected_index, i, *name).clicked() {
+                                    ui.close_menu();
+                                }
+                            });
+                        }
+                    });
+                
+                if ui.button("▶").clicked() {
+                    selected_index = (selected_index + 1) % names.len();
+                }
+                
+                if selected_index != lut_mappers.get_active_index() {
+                    lut_mappers.set_active(selected_index);
+                    println!("Changed LUT to: {}", lut_mappers.get_active_name());
                 }
             });
-        
-        if selected_index != _palettes.get_active_index() {
-            _palettes.set_active(selected_index);
-        }
+            
+            // LUT reverse checkbox
+            ui.horizontal(|ui| {
+                ui.label("Options:");
+                let mut reversed = lut_mappers.get_active().is_reversed();
+                if ui.checkbox(&mut reversed, "Reverse").changed() {
+                    lut_mappers.get_active_mut().set_reversed(reversed);
+                    println!("LUT reversed: {}", reversed);
+                }
+            });
+        });
     });
     
     // Traces settings
@@ -726,7 +867,6 @@ pub fn render_type_distribution(
     ui: &mut egui::Ui,
     physics_snapshot: &PhysicsSnapshot,
     physics: &mut ExtendedPhysics,
-    _palettes: &mut SelectionManager<Box<dyn rendering::Palette>>,
 ) {
     ui.heading("Type Distribution");
 
